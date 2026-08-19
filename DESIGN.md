@@ -174,3 +174,9 @@ npx @deepseek-ai/dsh web                 # 或 dsh --profile headless "提示词
 - [x] 本机装 DSH + 真机挂载插件 + 用 Key 跑 headless 场景（验证 wiring 与真实稳定性）。
 - [x] 视 DSH RC 迭代校正 `exec`/`event` 字段（引擎不受影响）。
 - [x] **刚性锚点规则与三大铁律已定稿**（作者定死，不可变）→ 铁律见 `law.mjs` 的 THREE_IRON_LAWS（含"因果律全程陪同每个系统"补句）；R 域嵌套层级见 R_DOMAIN（宇宙⊃地球⊃宏观⊃微观）。`rigidAnchors` 示例集仍作具象越界判据，作者可按 R 层级补充。
+
+---
+
+## 11. 联系方式
+
+框架咨询 / 合作 / 审计对接：563003@qq.com

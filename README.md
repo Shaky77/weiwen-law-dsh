@@ -40,3 +40,9 @@ DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程）
 ---
 
 > 中英文版内容一致，互为参照。English counterpart: [**Shaky77/KISS_Law-DSH**](https://github.com/Shaky77/KISS_Law-DSH) —— 同 DSH / 导图形态，全英文；KISS 定义（Keep Integrity & Steady State's Law，非通俗工程 KISS）见英文版。
+
+---
+
+## 联系方式
+
+框架咨询 / 合作 / 审计对接：563003@qq.com
