@@ -1,8 +1,53 @@
 {
   "name": "dsh-weiwen-law",
   "version": "0.1.0",
-  "description": "唯稳律（Weiwen's Law）白箱风控插件 —— DeepSeek Harness (Cordis) 实现",
+  "description": "唯稳律（Weiwen's Law）通用因果引擎（白箱呈现）—— DeepSeek Harness (Cordis) 插件实现",
   "type": "module",
   "main": "./src/index.js",
-  "license": "MIT"
+  "files": [
+    "src",
+    "weiwen-law.patch.yml",
+    "README.md",
+    "DESIGN.md",
+    "LICENSE",
+    "examples",
+    "test"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "AGPL-3.0",
+  "author": {
+    "name": "Shaky77",
+    "email": "563003@qq.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shaky77/weiwen-law-dsh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Shaky77/weiwen-law-dsh/issues"
+  },
+  "homepage": "https://github.com/Shaky77/weiwen-law-dsh#readme",
+  "keywords": [
+    "ai",
+    "causal",
+    "guardrail",
+    "white-box",
+    "deepseek",
+    "harness",
+    "agent",
+    "safety"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": false
+    }
+  }
 }
