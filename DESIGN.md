@@ -107,7 +107,7 @@ ctx.on('agent/pre-step', (event, next) => {
 ctx.on('tools/result', (res) => { if (res?.error) engine.onFailure(); });
 ```
 
-自查工具：`query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_iron_laws`。铁律定稿见 law.mjs 的 THREE_IRON_LAWS（不可变）；R 域嵌套层级见 R_DOMAIN（宇宙⊃地球⊃宏观⊃微观）。
+自查工具：`query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_iron_laws` / `query_bugstop`（第一BUG停止闭环白箱自查）。铁律定稿见 law.mjs 的 THREE_IRON_LAWS（不可变）；R 域嵌套层级见 R_DOMAIN（宇宙⊃地球⊃宏观⊃微观）。
 
 ---
 

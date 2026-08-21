@@ -114,14 +114,14 @@ export function apply(ctx) {
 }
 ```
 
-> 完整实现（含 5 个工具的 `execute` 细节、运行日志、引擎裁决逻辑）见仓库 `src/index.js`。
+> 完整实现（含 6 个工具的 `execute` 细节、运行日志、引擎裁决逻辑）见仓库 `src/index.js`。
 
 ## 结构
 
 ```
 package.json          # dsh 字段声明 bundle
 weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
-src/index.js          # 插件入口：钩子 + 5 个白箱自查工具
+src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义（RDSHM / 三大铁律 / R 层级 / 传导链）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
 test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 44/44 通过）
