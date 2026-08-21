@@ -137,6 +137,8 @@ ctx.on('tools/result', (res) => { if (res?.error) engine.onFailure(); });
 定稿见 `law.mjs` 的 `CALIBRATION`（rule / parallelWith / rLayerVerification）与 `R_DOMAIN.fractalSubdivision`。
 **实证**：API 复跑中 DeepSeek 调 `query_logic_backtracking` 后，独立反推出层级路径与"卡点落最内细分规则层（复验判前提失真）"，与本节一致（见 `examples/`）。
 
+**闭环补强（作者补全 2026-08-21）**：反推不能止于"溯"。本插件 `src/core/bugstop.mjs` 实现第一BUG停止闭环状态机——BUG→停止→反推→溯源→修复(验证)→重入；未修复前 `canReenter` 拒绝重入，从根上阻断"只反推不修复→无限递归"。与铁律②同构：断是手段，"让系统活"（闭环到重入）才是目的。
+
 **未采用**：V0.6.1 的 `M=(S×R)/(D×H)` 量化公式与问卷/学科矩阵数值——与白箱结构语义冲突，硬塞会拧巴。
 
 ---

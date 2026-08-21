@@ -5,6 +5,10 @@
 // 这是插件的"大脑"：所有 R / D / S / H / M 的裁决逻辑都在这里，与宿主框架解耦。
 // DSH 适配器（index.ts）只把引擎挂到 tools/pre-execute 与 agent/pre-step 钩子上。
 
+// 第一BUG停止闭环状态机（作者补全 · 2026-08-21）：强制走完"断"之后的必然后半程，
+// 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
+import { BugStopGuard } from './bugstop.mjs';
+
 // ---------------- 默认 R 刚性锚点策略（具象判据示例；R 本体定义见 law.mjs 的 R_DOMAIN） ----------------
 // R 的本质：嵌套包含的客观规则体系（宇宙⊃地球⊃宏观⊃微观），刚性来自客观规则不随主观转移。
 // 以下为"已识别的具象越界模式"示例判据，作者可按 R 层级补充完整规则条目；不预设数值常量。
@@ -69,6 +73,8 @@ export class WeiwenLawEngine {
   constructor(opts = {}) {
     // 刚性锚点规则：可整体替换，默认套用示例集（作者可调）
     this.rigidAnchors = opts.rigidAnchors ?? DEFAULT_RIGID_ANCHORS;
+    // 第一BUG停止闭环状态机（可整体替换；默认内置）。未修复前禁止重入，阻断无限递归。
+    this.bugStop = opts.bugStop ?? new BugStopGuard();
     // 木桶效应：把系统拆成若干子系统，有效 S 取各子系统最小值
     this.subsystems = opts.subsystems ?? ['core'];
     this.sBySubsystem = {};
@@ -202,6 +208,13 @@ export class WeiwenLawEngine {
 
   // ---------- 工具调用前总裁决（对应 DSH tools/pre-execute） ----------
   decideToolCall(call) {
+    // —— 闭环闸门：未修复的故障环节禁止重入（阻断无限递归）——
+    const re = this.bugStop.canReenter(call);
+    if (!re.allowed) {
+      // 不计入破窗计数：同一 BUG 反复重跑属"闭环未闭合"，由 guard.attempts 追踪，不污染 D 破窗
+      return { kind: 'deny', law: 'M', reason: re.reason, bugKey: re.bugKey, stage: re.stage, missing: re.missing, closedLoop: true };
+    }
+
     const r = this.checkRigidAnchor(call);
     if (r) {
       this.failureStreak += 1; // 每次被拦的越界动作都计入破窗计数
@@ -220,8 +233,10 @@ export class WeiwenLawEngine {
     }
     const m = this.checkFirstBug(call);
     if (m) {
+      // 第一BUG停止：切断该环节（铁律②·以断保续），并登记进入闭环
+      const halt = this.bugStop.halt(call);
       this.failureStreak += 1;
-      return { kind: 'deny', law: 'M', reason: m.reason };
+      return { kind: 'deny', law: 'M', reason: m.reason + '（已入闭环：须 反推→溯源→修复(验证)→重入，禁止带原BUG重跑）', bugKey: halt.bugKey, closedLoop: true };
     }
     // 通过：记录稳态正向增量（S 只增不减）
     this.recordSteady({ positive: 1 });
@@ -252,4 +267,22 @@ export class WeiwenLawEngine {
   healWindow() {
     this.failureStreak = 0;
   }
+
+  // ---------- 第一BUG停止闭环驱动（供 harness / 编排层显式推进） ----------
+  // 逻辑反推完成（溯）：标记 reversed
+  reverseBug(bugKey) { return this.bugStop.reverse(bugKey); }
+  // 溯源标记：记录沿 R 包含轴反溯定位的根因层
+  traceBug(bugKey, rootCause = null) { return this.bugStop.trace(bugKey, rootCause); }
+  // 解决/修复 + 验证：verify(fix) 须返回真方算 resolved。
+  // 默认 verify：修复后的调用不再触发 checkFirstBug（即 BUG 确实消除）。验证通过→清破窗计数（横向重启保活）。
+  resolveBug(bugKey, fix = null, verify = null) {
+    const v = typeof verify === 'function' ? verify
+      : (fix && typeof fix === 'object') ? () => this.checkFirstBug(fix) === null
+      : () => true;
+    const res = this.bugStop.resolve(bugKey, fix, v);
+    if (res.ok) this.healWindow();
+    return res;
+  }
+  // 闭环状态只读快照（白箱审计 / query_bugstop 工具用）
+  bugStopSnapshot() { return this.bugStop.snapshot(); }
 }

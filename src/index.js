@@ -134,6 +134,20 @@ function apply(ctx) {
       return { ironLaws: THREE_IRON_LAWS };
     },
   }));
+
+  // 第一BUG停止闭环状态机白箱自查（作者补全 2026-08-21）
+  ctx.tools.register(defineTool({
+    name: 'query_bugstop',
+    description: '查询第一BUG停止闭环状态机：当前有哪些故障环节已停但未修复（halted 但未 resolved），各自缺失步骤（逻辑反推/溯源标记/解决修复）。用于白箱观测闭环是否闭合，避免"只反推不修复→无限递归"。',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
+    async execute() {
+      return {
+        stops: engine.bugStop.snapshot(),
+        note: 'halted 且 resolved=false 的环节禁止重入；须 反推→溯源→修复(验证) 方可重入。',
+      };
+    },
+  }));
 }
 
 export { name, inject, apply };
