@@ -33,17 +33,34 @@ function apply(ctx) {
 
   // ---------- R / D / S / H / M 总裁决：工具调用前置闸门（waterfall） ----------
   ctx.on('tools/pre-execute', async (exec, next) => {
+    const a = exec?.arguments ?? {};
     const call = {
       name: exec?.name,
-      args: exec?.arguments,
-      command: exec?.arguments?.command,
-      code: exec?.arguments?.code,
+      args: a,
+      command: a.command,
+      code: a.code,
+      // 将第一BUG结构性标志提到顶层，供 engine.checkFirstBug 读取
+      // （DSH 在 exec.arguments 上传这些标志；引擎在 call 上读取）
+      selfReference: a.selfReference,
+      paradox: a.paradox,
+      deadlock: a.deadlock,
+      contradiction: a.contradiction,
+      paramTypeError: a.paramTypeError,
     };
     const decision = engine.decideToolCall(call);
     logline(`pre-execute ${exec?.name} -> ${decision.kind}${decision.law ? '(' + decision.law + ')' : ''}`);
     if (decision.kind === 'deny') {
       // 阻断该步、不扩散（D 破窗止损 / M 以断保续的落点）
-      return { kind: 'deny', reason: `[唯稳律·${decision.law}] ${decision.reason}` };
+      // 透传引擎闭环字段（bugKey/closedLoop/missing/stage），供调用方读取
+      return {
+        kind: 'deny',
+        law: decision.law,
+        reason: `[唯稳律·${decision.law}] ${decision.reason}`,
+        ...(decision.bugKey !== undefined ? { bugKey: decision.bugKey } : {}),
+        ...(decision.closedLoop !== undefined ? { closedLoop: decision.closedLoop } : {}),
+        ...(Array.isArray(decision.missing) ? { missing: decision.missing } : {}),
+        ...(decision.stage !== undefined ? { stage: decision.stage } : {}),
+      };
     }
     return next();
   });

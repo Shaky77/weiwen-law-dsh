@@ -167,7 +167,7 @@ export DEEPSEEK_API_KEY=sk-xxxx     # Linux/macOS
 #    $env:DEEPSEEK_API_KEY="sk-xxxx" # Windows PowerShell
 ```
 
-挂载后，运行在该 profile 的 Agent 自动获得 6 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` 等），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门。
+挂载后，运行在该 profile 的 Agent 自动获得 6 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_bugstop`），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门（R/D/S/H/M 总裁决）与 `agent/pre-step` 内 H 不可侵闸门。
 
 ### 日常使用 vs 压测
 
