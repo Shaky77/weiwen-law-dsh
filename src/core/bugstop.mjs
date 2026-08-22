@@ -117,15 +117,28 @@ export class BugStopGuard {
   }
 
   // 调试/审计视图（只读快照）
+  // status 字段语义（面向大众须严谨，不可误读为"漏放"）：
+  //  - 'closed'            ：闭环已走完（反推→溯源→修复验证），正常收口
+  //  - 'blocked_unrepaired'：已 halt 且被 canReenter 硬闸拦下，被拦截方拒不走修复链、反复试探重入
+  //                          —— 从未放行过任何一次（escaped 计数实为"被闸死的拒不修复次数"，非真逃脱）
+  //  - 'open'              ：已 halt 但尚未观察到重入试探（静默待处理）
+  // 注意：唯稳律第一Bug停机为硬闸，理论上 escaped（真放行）恒为 0；若非 0 即引擎缺陷。
   snapshot() {
-    return [...this.stops.values()].map((s) => ({
-      bugKey: s.key,
-      halted: s.halted,
-      reversed: s.reversed,
-      traced: s.traced,
-      resolved: s.resolved,
-      attempts: s.attempts,
-      rootCause: s.rootCause,
-    }));
+    return [...this.stops.values()].map((s) => {
+      let status;
+      if (s.resolved) status = 'closed';
+      else if (s.halted && s.attempts >= 1) status = 'blocked_unrepaired';
+      else status = 'open';
+      return {
+        bugKey: s.key,
+        status,
+        halted: s.halted,
+        reversed: s.reversed,
+        traced: s.traced,
+        resolved: s.resolved,
+        attempts: s.attempts,
+        rootCause: s.rootCause,
+      };
+    });
   }
 }
