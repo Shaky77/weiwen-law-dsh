@@ -129,6 +129,57 @@ examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
 
+## 部署 / 接入 DeepSeek Harness
+
+本仓库是 DeepSeek Harness（dsh，命令 `dsh`，基于 Cordis 插件框架，MIT）的**外部插件**。唯稳律以"模型之外、执行之内"的因果约束层挂载，不修改 dsh 内核，不绑定具体模型。
+
+### 环境要求
+
+- Node.js `^22.19 || >=24`（dsh 硬性要求，奇数版本不支持）
+- DeepSeek API Key（或其他 OpenAI 兼容端点的 Key）
+- dsh 当前为开发者预览版（v0.1.x），官方提示后续存在破坏性 API 变更；生产环境请锁定具体版本
+
+### 方式一：npx 快速启动（推荐先体验）
+
+```bash
+npx @deepseek-ai/dsh web        # 启动 Web UI，默认 http://127.0.0.1:3080
+```
+
+浏览器打开后在 `Settings → Models` 填入 API Key，即可对话。
+
+### 方式二：挂载唯稳律插件
+
+将本仓库克隆到本地，把插件入口接入 dsh 的插件配置（通过 `weiwen-law.patch.yml` overlay）：
+
+```bash
+# 1. 获取插件
+git clone https://github.com/Shaky77/weiwen-law-dsh.git
+cd weiwen-law-dsh
+
+# 2. 在 dsh 的 cordis 配置中引入本插件入口（src/index.js）
+#    方式 A（推荐）：作为 --patch overlay 叠加到指定 profile
+dsh --profile headless --patch ./weiwen-law.patch.yml "你的任务提示词"
+#    方式 B：将插件路径加入 dsh 启动配置（cordis.yml）的 plugins 列表，长期生效
+
+# 3. 配置凭证（任选其一）
+#    - Web UI 的 Settings 中填写；或
+export DEEPSEEK_API_KEY=sk-xxxx     # Linux/macOS
+#    $env:DEEPSEEK_API_KEY="sk-xxxx" # Windows PowerShell
+```
+
+挂载后，运行在该 profile 的 Agent 自动获得 6 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` 等），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门。
+
+### 日常使用 vs 压测
+
+- **Web / Standard 模式**：日常对话与工程任务，插件在后台静默约束。
+- **Headless 模式**：`dsh --profile headless` 无界面批量运行，适合回归测试与多 Agent 压测（本仓库 `versions/live/evidence/` 即此类实测归档）。
+
+### 注意事项
+
+- 插件入口为纯 ESM（`src/index.js`），依赖 `@deepseek-ai/dsh-tools`（peerDependency，可选）；接入前请以 dsh 官方文档当前版本复核 API。
+- 远程部署 dsh 时需在配置中声明 `trustedHosts`，否则 API 层拒绝非本环路请求。
+- `pnpm` 源码构建 dsh 时**必须**先 `pnpm run build`（内部包链接与前端产物），否则报模块找不到。
+
 ## License
 
 [AGPL-3.0](./LICENSE)

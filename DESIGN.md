@@ -60,7 +60,7 @@
 ```
 dsh-weiwen-law-plugin/
 ├── package.json          # 声明 dsh 字段（bundle 指向 patch）
-├── cordis.patch.yml      # 插件挂载补丁
+├── weiwen-law.patch.yml  # 插件挂载补丁（DSH --patch overlay）
 ├── src/
 │   ├── index.js          # DSH 插件入口：apply(ctx) 挂真实钩子 + 自查工具
 │   └── core/
@@ -158,7 +158,7 @@ ctx.on('tools/result', (res) => { if (res?.error) engine.onFailure(); });
 # 真机联调（需先装 DSH 并配置 Key）
 npx @deepseek-ai/dsh web                 # 或 dsh --profile headless "提示词"
 # Settings → Models 填 DeepSeek API Key
-# 挂载 cordis.patch.yml（profile: standard）
+# 挂载 weiwen-law.patch.yml（profile: standard 或 headless）
 # 新建会话跑任务 → 模型可调用 query_* 工具自查 S / H / R
 ```
 

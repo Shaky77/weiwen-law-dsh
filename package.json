@@ -62,6 +62,9 @@
     "rigid-anchor",
     "agent-safety",
     "llm-guardrail",
+    "dsh-plugin",
+    "causal-logic",
+    "ai-alignment",
     "因果律",
     "因果推理",
     "因果引擎",
@@ -85,7 +88,7 @@
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-tools": {
-      "optional": false
+      "optional": true
     }
   }
 }
