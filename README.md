@@ -124,7 +124,7 @@ weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
 src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义（RDSHM / 三大铁律 / R 层级 / 传导链）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
-test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 114/114 通过）
+test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 118/118 通过）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
