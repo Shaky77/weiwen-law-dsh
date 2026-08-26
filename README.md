@@ -124,7 +124,7 @@ weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
 src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义（RDSHM / 三大铁律 / R 层级 / 传导链）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
-test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 44/44 通过）
+test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 114/114 通过）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
@@ -169,6 +169,23 @@ export DEEPSEEK_API_KEY=sk-xxxx     # Linux/macOS
 
 挂载后，运行在该 profile 的 Agent 自动获得 6 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_bugstop`），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门（R/D/S/H/M 总裁决）与 `agent/pre-step` 内 H 不可侵闸门。
 
+### 方式三：一行命令安装（官方 dsh plugin 机制，推荐）
+
+本插件已声明 `dsh.bundle.patch` 清单（见 `package.json`），DSH 用户可直接通过官方插件命令安装：
+
+```bash
+# 从 GitHub 安装（源码直装，推荐）
+dsh plugin --profile web add "github:Shaky77/weiwen-law-dsh"
+
+# 从 npm 安装（npm 发布后可用）
+# dsh plugin --profile web add "dsh-weiwen-law"
+
+# 重启生效
+dsh --profile web
+```
+
+装完后在 `设置 → 插件 → 插件列表` 可见 `weiwen-law` 状态为"已启用"；Agent 自动获得 6 个白箱自查工具 + 3 道硬性闸门（`tools/pre-execute` / `agent/pre-step` / `tools/result`）。
+
 ### 日常使用 vs 压测
 
 - **Web / Standard 模式**：日常对话与工程任务，插件在后台静默约束。
@@ -192,11 +209,11 @@ export DEEPSEEK_API_KEY=sk-xxxx     # Linux/macOS
 
 ## 版本分层说明（重要）
 
-本仓库为基础版（导图 / 心法层）——框架定义、三大铁律、RDSHM 传导链的**不可变门面**，仅作参照与对接入口。
+**本仓库 = 活系统版（DSH）**（对应 GitHub `Shaky77/weiwen-law-dsh`）——基于完整版演进的可运行 DeepSeek Harness（DSH）插件形态，承载迭代与多 Agent 压测实测证据。**不是基础版。**
 
+- **基础版（导图 / 心法层 · 冻结不可动）**：`Shaky77/Weiwen-s_Law`（中文）与 `Shaky77/KISS-s_Law`（英文）——框架定义、三大铁律、RDSHM 传导链的**不可变门面**，仅作参照与对接入口。
 - **完整版**：在基础版之上补全工程化细节与完整实现，可通过联系方式向作者获取。
-- **活系统版（DSH）**：基于完整版演进，已做成可运行的 DeepSeek Harness（DSH）插件形态，**独立仓库可用**（含多 Agent 压测实测证据）。
-- **分层关系**：基础版（心法）→ 完整版 → 活系统版（DSH）。DSH 依据活系统版构建，**不等于**基础版，二者中间相隔完整版，请勿混淆。
+- **分层关系**：基础版（心法）→ 完整版 → 活系统版（DSH）。DSH 依据完整版构建，**不等于**基础版，请勿混淆。
 
 ## 联系方式
 
