@@ -19,7 +19,10 @@ const TOOL_CATEGORY = {
   send_mail: 'exfil', upload: 'exfil',
   exec: 'exec', run_task: 'exec', bash: 'exec', shell: 'exec',
 };
-const CREDENTIAL_PATH = /\.(env|pem|key|token|credentials|secret)|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])|[^A-Za-z0-9](secret|token|credential)(?![A-Za-z0-9])/i;
+// R 是客观规则（宇宙法则/科学验证/社会共识），边界本应清晰，工程实现不得用模糊子串匹配歪曲规则。
+// 凭据文件判据：只认"独立扩展名形态"——.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中，作者裁定 2026-08-26 · 陈杰误伤修复）；
+// 灰色地带（R 不命中）交给推演层判风险，决策权交还用户（因果不担责，唯稳律不担责）。
+const CREDENTIAL_PATH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])|[^A-Za-z0-9](secret|token|credential)(?![A-Za-z0-9])/i;
 // 命令文本（sh）里的凭据判据：只认"凭据文件路径形态"（扩展名/系统路径段），不匹配纯关键词——
 // 否则 `grep SECRET`、讲解凭据的文档文本都会被误伤（作者裁定 2026-08-25 · C10 误伤修复）。
 const CREDENTIAL_SH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])/i;
