@@ -1,4 +1,4 @@
-// 唯稳律（Weiwen's Law）DeepSeek Harness 插件入口（纯 ESM，按 dsh v0.1.0-rc.6 真实 API 编写）
+// 唯稳律（Weiwen's Law）宿主框架插件入口（纯 ESM）
 // 承载形态：拦截钩子（硬性护栏）+ 工具集（白箱自查）
 // 来源：作者揭示（夏祺 / Shaky77）。框架本体严格本位，不软化、不篡改。
 //
@@ -49,9 +49,10 @@ function apply(ctx) {
     };
     const decision = engine.decideToolCall(call);
     logline(`pre-execute ${exec?.name} -> ${decision.kind}${decision.law ? '(' + decision.law + ')' : ''}`);
-    if (decision.kind === 'deny') {
-      // 阻断该步、不扩散（D 破窗止损 / M 以断保续的落点）
-      // 透传引擎闭环字段（bugKey/closedLoop/missing/stage），供调用方读取
+    if (decision.kind === 'deny' || decision.kind === 'review') {
+      // 阻断该步、不扩散（D 破窗止损 / M 以断保续 / 推演中高风险兜底）
+      // review（中风险）在无人工确认环境保守拦截；reason 已标注"建议二次确认"
+      // 透传引擎闭环字段与推演风险等级，供调用方读取
       return {
         kind: 'deny',
         law: decision.law,
@@ -60,6 +61,7 @@ function apply(ctx) {
         ...(decision.closedLoop !== undefined ? { closedLoop: decision.closedLoop } : {}),
         ...(Array.isArray(decision.missing) ? { missing: decision.missing } : {}),
         ...(decision.stage !== undefined ? { stage: decision.stage } : {}),
+        ...(decision.risk ? { risk: decision.risk } : {}),
       };
     }
     return next();
