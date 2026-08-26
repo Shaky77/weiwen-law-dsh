@@ -4,6 +4,11 @@
   "description": "唯稳律（Weiwen's Law）通用因果引擎（白箱呈现）—— DeepSeek Harness (Cordis) 插件实现",
   "type": "module",
   "main": "./src/index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./weiwen-law.patch.yml"
+    }
+  },
   "files": [
     "src",
     "weiwen-law.patch.yml",
