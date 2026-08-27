@@ -27,6 +27,16 @@
 - **第一 Bug 停机闭环**：停机只做"断"，本插件 `src/core/bugstop.mjs` 强制走完"断"之后的必然后半程——BUG→停止→反推→溯源→修复(验证)→重入；未修复前拒绝重入，从根上阻断"只反推不修复→无限递归"。
 - **分形**：同一插件可在子代理 / 子任务层级递归挂载。
 
+## 与其他「因果」方案的区别（通用型因果）
+
+唯稳律不是「又一个因果引擎」，而是**通用型（领域无关）因果裁决中间件**：只校验因果结构（R→D→S→H→M），对领域内容零知识，故法律、医疗、金融、机器人同一套机制。
+
+- **因果效应估计库**（DoWhy / CausalML / Pearl 等）→ 我们**不发现因果**，只**裁决**一个已提出的动作其因果链结构是否可接纳；
+- **领域专用因果护栏**（Causal Safety Engine / LLMGuardrail 等）→ 它们绑领域（安全 / LLM / 幻觉），我们**领域无关**；
+- **跨法域法律因果 AI**（judgeai 等）→ 它们 jurisdiction-**aware**（编码法域、换规范包），我们**法域中性**（根本不编码法域，法律只是抽样领域之一）。
+
+完整双语对照（含 prior-art 出处与诚实边界）：[`versions/live/evidence/weiwen-vs-market-causal.md`](./versions/live/evidence/weiwen-vs-market-causal.md)
+
 ## 快速开始（不依赖 DSH 也能跑）
 
 这条路径直连 DeepSeek API、不依赖 DSH 安装，**已实跑验证可复现**：

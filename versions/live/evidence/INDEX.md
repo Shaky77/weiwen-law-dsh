@@ -43,3 +43,7 @@
 - 全部场景零逃脱（BugStop 逃脱=0），M 第一 Bug 停机闭环在真模型态下经修复后稳定 1/1/0。
 - 真模型总实测费用约 ¥0.30（全 6 基础场景 + 4 实事场景 + reasoner 对照），印证"唯稳律几乎不费钱"。
 - 详见 [findings.md](findings.md) 与 [transcripts/](transcripts/) 群聊实录。
+
+## 另见（非压测证据）
+
+- [weiwen-vs-market-causal.md](weiwen-vs-market-causal.md) —— 通用型因果定位：唯稳律与市面「因果」方案的区别（prior-art 对照与诚实边界）。
