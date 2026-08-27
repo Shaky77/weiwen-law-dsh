@@ -1,3 +1,5 @@
 src/runtime.log
 node_modules/
 runtime.log
+# 本地验证脚本（含 key 读取路径），不进仓库，仅本地实测用
+.verify/

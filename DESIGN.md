@@ -191,6 +191,28 @@ npx @deepseek-ai/dsh web                 # 或 dsh --profile headless "提示词
 - 灰色地带（如写 `.key` 文件）→ 推演层判中风险 → `review`，交还用户决策。
 - 新增 4 条边界回归测试；全量 118/118 通过；DeepSeek API 实测 17/17（真实模型产生工具调用→引擎裁决：合法调用全放行、真实凭据全拦截、模型被拦后自动转向安全方案）。
 
+### 10.2 M 第一 Bug 停机 · 双线并行 + 法院式交叉复核（2026-08-27）
+
+**问题**：原 M 单线只认 DSH API 契约标志（`paradox`/`selfReference`/`deadlock`/`contradiction`/`paramTypeError`）——属**治标**：快但被动，**DSH 不报就漏停**。
+
+**设计（用户裁定 2026-08-27 · 9 图讨论"治标 vs 治本 + 法院结构"）**：M 触发改**双线并行 + 法院式交叉复核**：
+
+- **治标 A（`checkExplicitFlags`）**：沿用 DSH 五类契约标志，命中即"显式停机信号"。
+- **治本 B（`checkSchemaInference`）**：引擎**独立结构推断**，不依赖任何 DSH 标志，补齐 A 盲区（DSH 漏报时仍能独立停机）。只判客观**结构形态**，不枚举具体内容——`param-type`、`self-reference`、`contradiction`、`schema-deviation`（见 `_inferStructuralAnomaly`）。〔用户裁定 2026-08-27 · 去阈值〕**不做"失败累计达阈值"**——不纠结阈值、不纠结"触发几次锁死"，命中即拦截。
+- **法院交叉复核（`crossCheckM`）**：A、B 双线并行结论对照——一致（双 halt / 双 pass）→ **采纳**；不一致 → **打回重审**（`review`，保守拦截、交人工/二次确认）。
+
+**标记制 escalation（用户裁定 2026-08-27 · 补充点）**：拦截即**标记**，不纠结阈值。两条路径共享"标记累计达封顶即转人工"：
+
+- **flow1（同一 BUG 拒不修复、硬闯）**：闭环硬闸（`canReenter`）拦下反复重跑的同一 BUG（`bugKey` 稳定身份）→ `mBugForce[bugKey]` 累计；满 9 次 → **转人工决策**（`review` + `humanDecision:true`），AI 停止纠结、不耗算力。
+- **flow2（同一系统 9 次不同伪装）**：每次拦截都按 `systemId || name` 标记 `mSystemMarks[system]`（不同伪装 = 不同 `bugKey`，但同系统共享计数）；满 9 次 → **转人工决策**。
+- 达封顶后统一返回 `humanDecision:true`：AI 不再草率定夺，把裁决权交还人类；封顶 `mHumanCap` 默认 9（作者可调）。
+
+**闭环修复收紧**：`resolveBug` 默认验证须**双线皆清**（治标 `checkFirstBug` 为空 **且** 治本 `_inferStructuralAnomaly` 为空），拒绝只修一侧；修复成功回收该 BUG 与所属系统的标记（`healMMarks`）。
+
+**裁定铁律不变**：M = 第一 Bug 停机（以断保续）。双线一致确认停机才入硬闭环（`bugStop.halt` + `closedLoop`）；不一致仅打回重审，不入硬闭环——宁可复核，不草率定夺。
+
+**测试**：新增/修订 `test/m-court.test.mjs` 10 条（四组合 + flow1 硬闯转人工 + flow2 伪装转人工 + 推演灰区转人工 + 治本独立识别 + 双线皆清闭环 + `mHumanCap` 可调）；既有 `bugstop.test.mjs`/`engine.test.mjs` 的 M 用例保留"确认停机 + 以断保续"路径。全量 **128/128 通过**；DeepSeek API 实测 R/凭据层 **10/10 通过（0 未过）**、无回归。
+
 ---
 
 ## 11. 联系方式

@@ -7,7 +7,7 @@
 
 // 第一BUG停止闭环状态机（作者补全 · 2026-08-21）：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
-import { BugStopGuard } from './bugstop.mjs';
+import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
 
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
@@ -324,6 +324,15 @@ export class WeiwenLawEngine {
     // 破窗计数（连续失败 / 偏离累积）；阈值仅示意，作者可调
     this.failureStreak = 0;
     this.maxFailureStreak = opts.maxFailureStreak ?? 5;
+    // 〔M 第一BUG停机 · 标记制 escalation · 用户裁定 2026-08-27〕
+    // 不纠结阈值、不纠结"触发几次锁死"——拦截即标记，标记累计到封顶即转人工，AI 不再耗算力纠结。
+    //   mBugForce   ：同一 BUG（bugKey 稳定身份）被拒不修复、反复硬闯的累计标记数 → 达封顶转人工（flow1）
+    //   mSystemMarks：同一系统（systemId/name）被标记的总次数，含不同伪装的多次拦截 → 达封顶转人工（flow2）
+    //   mBugSystem  ：bugKey→systemKey 反查映射，供修复闭环回收系统标记
+    this.mBugForce = new Map();
+    this.mSystemMarks = new Map();
+    this.mBugSystem = new Map();
+    this.mHumanCap = opts.mHumanCap ?? 9; // 封顶转人工（用户定 9）
     // 本会话写盘登记表（作者裁定 2026-08-25 · 链式状态兜底）：放行的 write 记录 path→content，
     // 后续执行类 call 引用已登记路径时触发复核（refsSessionWritten）。只登记本会话写入，不猜文件系统。
     this.sessWritten = new Map();
@@ -392,6 +401,9 @@ export class WeiwenLawEngine {
       ledgerSize: this.sLedger.size,
       standbySize: this.sStandby.length, // 静默待机（旧版本）数，append-only 保留
       failureStreak: this.failureStreak,
+      mHumanCap: this.mHumanCap,
+      mBugForce: Object.fromEntries(this.mBugForce),
+      mSystemMarks: Object.fromEntries(this.mSystemMarks),
       // 注：全量 historyTrail 仍保留于实例（this.historyTrail）供深度审计，默认不进 snapshot。
     };
   }
@@ -428,10 +440,18 @@ export class WeiwenLawEngine {
     return null;
   }
 
-  // ---------- M 第一 Bug 停机：检测不可恢复逻辑悖论/结构性故障（以断保续） ----------
-  // 触发条件（对齐意见 P2-2 增强，不改变铁律定义）：
-  //   paradox 显式标记 / 调用链自引用死循环 / 参数类型严重不匹配 / 返回结果与预期完全矛盾。
-  checkFirstBug(call) {
+  // ---------- M 第一 Bug 停机 · 双线并行 + 法院式交叉复核 ----------
+  // 治标 A（checkExplicitFlags）：依赖 DSH API 契约标志（paradox / selfReference /
+  //   deadlock / contradiction / paramTypeError）—— 快但被动，DSH 不报就漏。
+  // 治本 B（checkSchemaInference）：引擎独立结构推断（schema 比对 + 失败累计），
+  //   不依赖任何 DSH 标志，补齐 A 的盲区（DSH 漏报时仍能独立停机）。
+  // 法院式交叉复核（crossCheckM）：A、B 双线并行，结论一致→采纳；不一致→打回重审（review，
+  //   保守拦截，不硬 halt 也不 allow，交人工/二次确认）。与"以断保续"同构：宁可复核，不草率定夺。
+  // 触发条件（铁律定义不变）：A 沿用对齐意见 P2-2 增强的五类契约标志；
+  //   B 见 _inferStructuralAnomaly（客观结构，非内容枚举）。
+
+  // 治标 A：DSH 契约标志命中即视为"显式停机信号"
+  checkExplicitFlags(call) {
     if (!call) return null;
     const triggers = [
       call.paradox === true,
@@ -441,9 +461,122 @@ export class WeiwenLawEngine {
       call.contradiction === true, // 返回结果与预期完全矛盾
     ];
     if (triggers.some(Boolean)) {
-      return { reason: '检测到不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。' };
+      return { reason: 'DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。' };
     }
     return null;
+  }
+  // 向后兼容别名（既有测试 / 调用方仍可用 checkFirstBug）
+  checkFirstBug(call) { return this.checkExplicitFlags(call); }
+
+  // 治本 B：引擎独立结构推断（纯函数，无状态副作用，供 verify 复用）
+  // 只判客观"结构形态"，不枚举具体内容；命中即结构性故障信号。
+  _inferStructuralAnomaly(call) {
+    if (!call || typeof call !== 'object') {
+      return { kind: 'schema-deviation', reason: '调用形态退化（非对象），不符合良构工具调用结构' };
+    }
+    if (!(call.name || call.tool)) {
+      return { kind: 'schema-deviation', reason: '调用缺目标（无 name/tool），无法裁定且无法审计' };
+    }
+    if (call.args != null && typeof call.args !== 'object') {
+      return { kind: 'schema-deviation', reason: 'args 形态异常（非对象），不符合良构工具调用结构' };
+    }
+    const a = call.args ?? {};
+    // paramTypeAnomaly：本应为基元（路径/命令/URL 等）的参数却是对象/数组/函数 → 类型错配（独立于 DSH paramTypeError 标志）
+    const PRIMITIVE_KEYS = ['path', 'file', 'command', 'code', 'url', 'src', 'dest'];
+    for (const k of PRIMITIVE_KEYS) {
+      if (k in a) {
+        const v = a[k];
+        if ((v !== null && typeof v === 'object') || typeof v === 'function') {
+          return { kind: 'param-type', reason: `参数 ${k} 应为基元却收到 ${Array.isArray(v) ? '数组' : '对象/函数'}，结构类型错配` };
+        }
+      }
+    }
+    // selfReferenceAnomaly：调用自引用 / 嵌套自调用（独立于 DSH selfReference 标志）
+    const selfId = call.id ?? call.callId ?? call.call_id;
+    if (typeof selfId === 'string' && selfId.length > 0) {
+      const argsStr = JSON.stringify(a);
+      if (argsStr.includes(selfId)) {
+        return { kind: 'self-reference', reason: '调用参数引用了自身 id，构成自引用/潜在死循环' };
+      }
+    }
+    if (typeof a.tool === 'object' && a.tool && a.tool.name === call.name) {
+      return { kind: 'self-reference', reason: 'args 嵌套了同名工具自调用，潜在无限递归' };
+    }
+    if (typeof a.call === 'object' && a.call && a.call.name === call.name) {
+      return { kind: 'self-reference', reason: 'args 嵌套了同名调用，潜在无限递归' };
+    }
+    // contradictionAnomaly：互斥参数同时为真 / 重复语义动作键（独立于 DSH contradiction 标志）
+    if (a.read === true && a.write === true) {
+      return { kind: 'contradiction', reason: '同一调用同时声明 read 与 write，意图自相矛盾' };
+    }
+    const actionKeys = Object.keys(a).filter((k) => /^(mode|action|op|operation)$/i.test(k));
+    if (actionKeys.length >= 2) {
+      return { kind: 'contradiction', reason: `存在 ${actionKeys.length} 个互斥语义动作键（${actionKeys.join('/')}），结构矛盾` };
+    }
+    const dry = a.dry_run === true || a.noop === true || a.check === true;
+    const apply = a.apply === true || a.commit === true || a.execute === true;
+    if (dry && apply) {
+      return { kind: 'contradiction', reason: '同时声明 dry-run(预检) 与 apply(执行)，结构矛盾' };
+    }
+    return null;
+  }
+
+  // 治本 B：在结构推断之上叠加"失败累计"（独立累加器，不污染 D 破窗计数）
+  //   单点结构异常 → 即时停机（治本）；反复出现 → 累计达阈值同样停机（系统性结构腐化）。
+  // 〔用户裁定 2026-08-27 · 去阈值〕不再做"累计达阈值"——不纠结阈值，命中即拦截，拦截即标记（见 _markIntercept）。
+  checkSchemaInference(call) {
+    const anomaly = this._inferStructuralAnomaly(call);
+    if (anomaly) {
+      return { halt: true, source: 'schema', reason: `引擎独立结构推断命中 ${anomaly.kind}：${anomaly.reason}（治本·不依赖 DSH 标志）`, anomaly };
+    }
+    return { halt: false, source: null, reason: null, anomaly: null };
+  }
+
+  // 法院式交叉复核：A=治标，B=治本，双线并行结论对照
+  //   一致（双 halt / 双 pass）→ 采纳该结论；不一致 → 打回重审（review，保守拦截）
+  crossCheckM(mA, mB) {
+    const aHalt = !!mA;            // 治标是否命中
+    const bHalt = !!mB?.halt;      // 治本是否命中
+    const consistent = aHalt === bHalt;
+    if (consistent) {
+      return { consistent: true, verdict: aHalt ? 'halt' : 'pass', aHalt, bHalt };
+    }
+    return { consistent: false, verdict: 'review', aHalt, bHalt };
+  }
+
+  // 〔用户裁定 2026-08-27 · 标记制〕拦截即标记：返回该次拦截后的累计计数与是否达封顶。
+  //   systemKey：call.systemId || call.name（同一系统，不同伪装共享同一计数）
+  //   bugKey   ：稳定 BUG 身份（bugKeyOf），同一 BUG 拒不修复、反复硬闯共享同一计数
+  // 任一线达封顶 mHumanCap → human=true，AI 停止纠结、转人工决策，不耗算力。
+  _markIntercept(call, bugKey) {
+    const systemKey = call?.systemId || call?.name || '_unknown';
+    const sysCount = (this.mSystemMarks.get(systemKey) || 0) + 1;
+    this.mSystemMarks.set(systemKey, sysCount);
+    let bugCount = 0;
+    if (bugKey) {
+      bugCount = (this.mBugForce.get(bugKey) || 0) + 1;
+      this.mBugForce.set(bugKey, bugCount);
+      this.mBugSystem.set(bugKey, systemKey);
+    }
+    const human = sysCount >= this.mHumanCap || bugCount >= this.mHumanCap;
+    return { systemKey, sysCount, bugCount, human, cap: this.mHumanCap };
+  }
+
+  // 闭环修复成功 / 运营确认健康：回收该 BUG 与所属系统的标记（横向重启，清累计）
+  healMMarks(bugKey) {
+    const systemKey = this.mBugSystem.get(bugKey);
+    if (systemKey) {
+      const left = (this.mSystemMarks.get(systemKey) || 0) - 1;
+      if (left <= 0) this.mSystemMarks.delete(systemKey);
+      else this.mSystemMarks.set(systemKey, left);
+      this.mBugSystem.delete(bugKey);
+    }
+    this.mBugForce.delete(bugKey);
+  }
+
+  // 转人工决策：AI 停止纠结，把裁决权交还人类（用户裁定 2026-08-27）
+  _toHuman({ law, bugKey, closedLoop, systemKey, reason }) {
+    return { kind: 'review', law, reason, bugKey, closedLoop: !!closedLoop, humanDecision: true, systemKey };
   }
 
   // ---------- 推演层（手稿 H 分叉-并行-对比）：灰区兜底，完整因果 ----------
@@ -489,6 +622,12 @@ export class WeiwenLawEngine {
     // —— 闭环闸门：未修复的故障环节禁止重入（阻断无限递归）——
     const re = this.bugStop.canReenter(call);
     if (!re.allowed) {
+      // 标记制 escalation（flow1：同一 BUG 拒不修复、反复硬闯）：达封顶转人工，AI 停止纠结
+      const mk = this._markIntercept(call, re.bugKey);
+      if (mk.human) {
+        return this._toHuman({ law: 'M', bugKey: re.bugKey, closedLoop: true, systemKey: mk.systemKey,
+          reason: `同一 BUG「${re.bugKey}」被拒不修复、反复硬闯已标记 ${mk.bugCount} 次，达封顶 ${mk.cap}：AI 停止纠结，转人工决策（免耗算力）` });
+      }
       // 不计入破窗计数：同一 BUG 反复重跑属"闭环未闭合"，由 guard.attempts 追踪，不污染 D 破窗
       return { kind: 'deny', law: 'M', reason: re.reason, bugKey: re.bugKey, stage: re.stage, missing: re.missing, closedLoop: true };
     }
@@ -509,12 +648,35 @@ export class WeiwenLawEngine {
       this.failureStreak += 1;
       return { kind: 'deny', law: 'H', reason: h.reason };
     }
-    const m = this.checkFirstBug(call);
-    if (m) {
-      // 第一BUG停止：切断该环节（铁律②·以断保续），并登记进入闭环
+    // —— M 第一BUG停机 · 双线并行 + 法院式交叉复核（治标 A + 治本 B）——
+    // 双线并行：A 依赖 DSH 契约标志（快但被动），B 引擎独立结构推断（不依赖 DSH，补盲区）。
+    // 法院复核：结论一致→采纳；不一致→打回重审（保守拦截，交人工/二次确认）。
+    const mA = this.checkExplicitFlags(call);    // 治标
+    const mB = this.checkSchemaInference(call);  // 治本（独立）
+    const mCourt = this.crossCheckM(mA, mB);
+    if (mCourt.verdict === 'halt') {
+      // 双线一致确认停机：切断该环节（铁律②·以断保续），登记进入闭环 + 标记
       const halt = this.bugStop.halt(call);
       this.failureStreak += 1;
-      return { kind: 'deny', law: 'M', reason: m.reason + '（已入闭环：须 反推→溯源→修复(验证)→重入，禁止带原BUG重跑）', bugKey: halt.bugKey, closedLoop: true };
+      const mk = this._markIntercept(call, halt.bugKey);
+      if (mk.human) {
+        return this._toHuman({ law: 'M', bugKey: halt.bugKey, closedLoop: true, systemKey: mk.systemKey,
+          reason: `同一 BUG「${halt.bugKey}」被拒不修复、反复硬闯已标记 ${mk.bugCount} 次，达封顶 ${mk.cap}：AI 停止纠结，转人工决策（免耗算力）` });
+      }
+      const why = [mA?.reason, mB?.reason].filter(Boolean).join(' ｜ ');
+      return { kind: 'deny', law: 'M', reason: `第一 Bug 停机（双线复核一致确认）：${why}（已入闭环：须 反推→溯源→修复(验证)→重入，禁止带原BUG重跑）`, bugKey: halt.bugKey, closedLoop: true, mCrossCheck: mCourt, mMark: mk };
+    }
+    if (mCourt.verdict === 'review') {
+      // 双线不一致 → 打回重审：保守拦截（不硬 halt、不 allow），标记但不入硬闭环
+      const bk = bugKeyOf(call);
+      const mk = this._markIntercept(call, bk);
+      if (mk.human) {
+        return this._toHuman({ law: 'M', bugKey: bk, closedLoop: false, systemKey: mk.systemKey,
+          reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（含不同伪装），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
+      }
+      const aLabel = mA ? 'halt' : 'pass';
+      const bLabel = mB?.halt ? 'halt' : 'pass';
+      return { kind: 'review', law: 'M', reason: `M 双线复核不一致（治标=${aLabel} / 治本=${bLabel}）：结论冲突，打回重审，建议人工/二次确认`, deduced: true, mCrossCheck: mCourt, mMark: mk };
     }
     // 判定层全过 → 下沉推演层（手稿 H 分叉-并行-对比，灰区完整因果）
     const risk = this.deduceRisk(call);
@@ -522,12 +684,22 @@ export class WeiwenLawEngine {
     this.recordDeduction(risk.m);
     if (risk.verdict === 'deny') {
       this.failureStreak += 1; // 高风险计入破窗计数（与 R 命中同权）
-      return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', deduced: true };
+      const mk = this._markIntercept(call, bugKeyOf(call));
+      if (mk.human) {
+        return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
+          reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（不合规拦截累计），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
+      }
+      return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', deduced: true, mMark: mk };
     }
     if (risk.verdict === 'review') {
-      // 中风险：限权/二次确认。真机无人工时保守拦截（见 index.js），此处返回 review 供调用方区分
+      // 中风险：灰区推演预测（flow2：灰色地带-标记-推演预测）→ 标记后保守拦截
       this._registerWrite(call);
-      return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', deduced: true };
+      const mk = this._markIntercept(call, bugKeyOf(call));
+      if (mk.human) {
+        return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
+          reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（灰区反复），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
+      }
+      return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', deduced: true, mMark: mk };
     }
     // 低风险：放行，记录稳态正向增量（S 只增不减）。登记本会话写盘（链式兜底）。
     this._registerWrite(call);
@@ -578,10 +750,10 @@ export class WeiwenLawEngine {
   // 默认 verify：修复后的调用不再触发 checkFirstBug（即 BUG 确实消除）。验证通过→清破窗计数（横向重启保活）。
   resolveBug(bugKey, fix = null, verify = null) {
     const v = typeof verify === 'function' ? verify
-      : (fix && typeof fix === 'object') ? () => this.checkFirstBug(fix) === null
+      : (fix && typeof fix === 'object') ? () => this.checkFirstBug(fix) === null && this._inferStructuralAnomaly(fix) === null
       : () => true;
     const res = this.bugStop.resolve(bugKey, fix, v);
-    if (res.ok) this.healWindow();
+    if (res.ok) { this.healWindow(); this.healMMarks(bugKey); }
     return res;
   }
   // 闭环状态只读快照（白箱审计 / query_bugstop 工具用）

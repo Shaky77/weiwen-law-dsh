@@ -123,11 +123,13 @@ test('H：正常步骤消息放行', () => {
 });
 
 // ---------------- M 第一 Bug 停机 ----------------
-test('M：不可恢复逻辑悖论被拒（以断保续）', () => {
+test('M：不可恢复逻辑悖论被拒（以断保续 · 双线确认停机）', () => {
   const e = new WeiwenLawEngine();
-  const d = e.decideToolCall({ name: 'reason', args: {}, paradox: true });
+  // 双线一致：DSH 标 paradox（治标）+ path 收对象（治本结构推断）→ 确认停机 deny + 闭环
+  const d = e.decideToolCall({ name: 'reason', args: { path: { nested: true } }, paradox: true });
   assert.equal(d.kind, 'deny');
   assert.equal(d.law, 'M');
+  assert.equal(d.closedLoop, true);
 });
 
 // ---------------- 综合：放行后 S 累积 ----------------

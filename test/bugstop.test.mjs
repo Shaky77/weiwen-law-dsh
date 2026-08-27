@@ -7,27 +7,34 @@ import assert from 'node:assert/strict';
 import { WeiwenLawEngine } from '../src/core/engine.mjs';
 import { BugStopGuard } from '../src/core/bugstop.mjs';
 
-// ---------------- 阻断无限递归：带原BUG重跑被拒 ----------------
-test('闭环：第一BUG停止后，带原BUG反复重跑一律拒绝（阻断无限递归）', () => {
+// ---------------- 阻断无限递归：带原BUG重跑被拒，拒不修复硬闯满 9 次转人工 ----------------
+test('闭环：第一BUG停止后，带原BUG反复重跑先一律拒绝；拒不修复硬闯满 9 次转人工', () => {
   const e = new WeiwenLawEngine();
-  const broken = { name: 'reason', args: {}, paradox: true };
+  // 双线一致：DSH 标 paradox（治标）+ path 收到对象（治本结构推断）→ 一致确认停机
+  const broken = { name: 'reason', args: { path: { nested: true } }, paradox: true };
   const d1 = e.decideToolCall(broken);
   assert.equal(d1.kind, 'deny');
   assert.equal(d1.law, 'M');
   assert.ok(d1.bugKey);
-  // 模拟"无限递归"：反复用同一 broken call 重跑
-  for (let i = 0; i < 12; i++) {
+  // 第 2~8 次：反复用同一 broken call 硬闯，闭环硬闸一律拦截
+  for (let i = 0; i < 7; i++) {
     const d = e.decideToolCall(broken);
     assert.equal(d.kind, 'deny');
     assert.equal(d.closedLoop, true);
     assert.ok(Array.isArray(d.missing) && d.missing.length > 0, '应告知缺失步骤');
   }
+  // 第 9 次：同一 BUG 拒不修复硬闯满 9 次标记 → 转人工决策（AI 停止纠结，不耗算力）
+  const dh = e.decideToolCall(broken);
+  assert.equal(dh.kind, 'review');
+  assert.equal(dh.humanDecision, true);
+  assert.ok(dh.reason.includes('转人工'));
 });
 
 // ---------------- 闭环闭合后：重入放行 ----------------
 test('闭环：完成 反推→溯源→修复(验证) 后，重入放行', () => {
   const e = new WeiwenLawEngine();
-  const broken = { name: 'reason', args: {}, paradox: true };
+  // 双线一致：paradox（治标）+ path 收对象（治本）→ 确认停机（须先走 deny + 闭环）
+  const broken = { name: 'reason', args: { path: { nested: true } }, paradox: true };
   const d1 = e.decideToolCall(broken);
   const key = d1.bugKey;
   assert.ok(key);
@@ -45,7 +52,8 @@ test('闭环：完成 反推→溯源→修复(验证) 后，重入放行', () =
 // ---------------- 核心补强点：只反推不修复，仍禁止重入 ----------------
 test('闭环：只做逻辑反推、不修复，依旧禁止重入', () => {
   const e = new WeiwenLawEngine();
-  const broken = { name: 'reason', args: {}, selfReference: true };
+  // 双线一致：selfReference（治标）+ path 收到对象（治本）→ 一致确认停机
+  const broken = { name: 'reason', args: { path: { nested: true } }, selfReference: true };
   e.decideToolCall(broken);
   const key = e.bugStopSnapshot()[0].bugKey;
   e.reverseBug(key); // 仅反推，不修复
