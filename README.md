@@ -195,6 +195,12 @@ dsh --profile web
 
 装完后在 `设置 → 插件 → 插件列表` 可见 `weiwen-law` 状态为"已启用"；Agent 自动获得 6 个白箱自查工具 + 3 道硬性闸门（`tools/pre-execute` / `agent/pre-step` / `tools/result`）。
 
+### 卸载
+
+- **方式三安装的**（官方 plugin 机制）：`dsh plugin --profile web remove dsh-weiwen-law`，重启生效。
+- **方式二 overlay 挂载的**：从 dsh 启动配置（cordis.yml 的 plugins 列表或 `--patch` 参数）移除 `weiwen-law.patch.yml` 引用，重启生效。
+- 移除后 Agent 不再获得 6 个白箱自查工具，也不再有 3 道硬闸门；插件本身不写持久状态，卸载即干净。
+
 ### 日常使用 vs 压测
 
 - **Web / Standard 模式**：日常对话与工程任务，插件在后台静默约束。
