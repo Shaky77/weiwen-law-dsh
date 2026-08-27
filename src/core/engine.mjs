@@ -1,11 +1,9 @@
 // 唯稳律（Weiwen's Law）护栏引擎 —— 纯逻辑，零 DSH 依赖，可独立单测
-// 来源：作者揭示（夏祺 / Shaky77）。框架本体严格本位，不软化、不篡改。
-// 约束：变量不预设数值；阈值标记"示意，作者可调"；作者揭示项标注来源。
 //
 // 这是插件的"大脑"：所有 R / D / S / H / M 的裁决逻辑都在这里，与宿主框架解耦。
 // DSH 适配器（index.ts）只把引擎挂到 tools/pre-execute 与 agent/pre-step 钩子上。
 
-// 第一BUG停止闭环状态机（作者补全 · 2026-08-21）：强制走完"断"之后的必然后半程，
+// 第一BUG停止闭环状态机：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
 import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
 
@@ -20,17 +18,16 @@ const TOOL_CATEGORY = {
   exec: 'exec', run_task: 'exec', bash: 'exec', shell: 'exec',
 };
 // R 是客观规则（宇宙法则/科学验证/社会共识），边界本应清晰，工程实现不得用模糊子串匹配歪曲规则。
-// 凭据文件判据：只认"独立扩展名形态"——.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中，作者裁定 2026-08-26 · 陈杰误伤修复）；
+// 凭据文件判据：只认"独立扩展名形态"——.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中）；
 // 灰色地带（R 不命中）交给推演层判风险，决策权交还用户（因果不担责，唯稳律不担责）。
 const CREDENTIAL_PATH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])|[^A-Za-z0-9](secret|token|credential)(?![A-Za-z0-9])/i;
 // 命令文本（sh）里的凭据判据：只认"凭据文件路径形态"（扩展名/系统路径段），不匹配纯关键词——
-// 否则 `grep SECRET`、讲解凭据的文档文本都会被误伤（作者裁定 2026-08-25 · C10 误伤修复）。
+// 否则 `grep SECRET`、讲解凭据的文档文本都会被误伤。
 const CREDENTIAL_SH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])/i;
 const SYSTEM_PATH = /\/(etc|sys|proc|boot)\//i;
 const EXTERNAL_TARGET = /https?:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^\s'"]+/i;
 
-// ---------------- 可审计性结构层（方向判据 · 非内容判据｜作者裁定 2026-08-24） ----------------
-// 作者原话：唯稳律只判方向。假设是黑客改了（伪装），从表面看是对的，但风险导向一定是坏的。
+// ---------------- 可审计性结构层 ----------------
 // 落地为结构性判据：一个「执行内容在执行前不可读」的动作，无论还原出来是什么，
 // 其因果方向恒为"S 不可保"——因为可审计性是 S 成立的前提：
 //   不可审计 ⇒ 不在白箱内 ⇒ 无法证明它是稳态增量 ⇒ S+1 不成立（非"查不出问题就放行"）。
@@ -43,7 +40,7 @@ const EXEC_SINK = /\|\s*(bash|sh|zsh|ksh|dash|python[\d.]*|perl|ruby|node|php)\b
 const REMOTE_SRC = /\b(curl|wget|iwr|Invoke-WebRequest)\b/i;
 const EVAL_SINK = /\b(eval|exec)\s*[\s(]|\bFunction\s*\(\s*['"]/i;
 const INDIRECT_REF = /\$\{?\w+|\$\(|`[^`]+`|\b(eval|exec)\s*\(\s*[A-Za-z_]\w*\s*[),]/;
-// ---- 可审计性扩展信号（作者裁定 2026-08-25 · 风险＜唯稳律＜稳态，无=，少一点/相等视为不行）----
+// ---- 可审计性扩展信号----
 // isOpaqueExec 只是"形态快速命中"，不是可审计性的全部。执行内容在执行前白箱读不到，
 // 还包含两类：①未知变量引用（值不在白箱内）②引用本会话写入的文件（内容由本会话产生）。
 // 任一类命中 ⇒ 无法证明稳态增量 ⇒ S+1 不成立 ⇒ 至少保守（review），绝不 allow。
@@ -63,7 +60,7 @@ function hasOpaqueVar(text) {
     const name = (m[1] || m[2] || m[3] || m[4] || '').toUpperCase();
     if (name && !KNOWN_VAR.has(name)) return true; // 未知变量：值在白箱外
   }
-  return false; // 命令替换/反引号子命令文本可见（可审计），不构成"值未知"（作者裁定 2026-08-25）
+  return false; // 命令替换/反引号子命令文本可见（可审计），不构成"值未知"
 }
 // 从执行内容提取被引用的脚本/文件路径（bash /tmp/x.sh、source ./x.sh、./run.sh …）
 function extractScriptRefs(text) {
@@ -78,7 +75,7 @@ function extractScriptRefs(text) {
   return out;
 }
 // 本会话写入内容里的破坏信号（与 R 锚点同款模式，非枚举具体内容）
-// 补 2026-08-25：解码执行链（base64/xxd 解码后管道进解释器）同为登记内容危险信号（C2 链式兜底）
+// 补 2026-08-25：解码执行链（base64/xxd 解码后管道进解释器）同为登记内容危险信号
 const SCRIPT_DANGER = /\brm\s+(-rf?|--recursive)\s+(\/|\*|\$\w+|~)|\b(mkfs|format)\b|\bcurl\b[^|]*\|\s*(bash|sh)\b|(base64\s+(-{1,2}d\w*|--decode)|xxd\s+-r)[^|]*\|\s*(bash|sh|zsh|dash)\b/i;
 function isOpaqueExec(text) {
   if (!text) return false;
@@ -89,7 +86,7 @@ function isOpaqueExec(text) {
   return false;
 }
 
-// 落点存在性（方向判据的第三段，作者裁定 2026-08-24 · 自查补齐）：
+// 落点存在性（方向判据的第三段）：
 // 「不透明源 → 转换/求值 → 执行落点」三段必须同时成立，方向才判坏。
 // 自查发现的误伤：只按文本形态判，会把"写一段讲解/安装说明的文档"也判成不可审计执行
 //   （写 README 含 `curl … | bash` 安装片段、写博客举反例 —— 文本永不被执行，落点不存在）。
@@ -143,13 +140,13 @@ function inferCallSemantics(call, ctx = {}) {
   const scriptRefs = extractScriptRefs(sh);
   const sessionHits = scriptRefs.filter((p) => ctx?.sessWritten?.has(p));
   const sessContentDanger = sessionHits.some((p) => SCRIPT_DANGER.test(ctx.sessWritten.get(p) || ''));
-  // 外部信号只在"动作方向"上判（作者裁定 2026-08-25）：命令文本（sh）任何类别都判；
+  // 外部信号只在"动作方向"上判：命令文本（sh）任何类别都判；
   // 内容字段（packed）只在执行/外传类上判——write 写文档含 URL 不构成外部动作，
   // 其落盘即执行通道的外部风险由 isOpaqueExec ③ 兜底，避免"文档提 curl"误伤。
   const isExecOrExfil =
     TOOL_CATEGORY[call?.name] === 'exec' || TOOL_CATEGORY[call?.name] === 'exfil' || TOOL_CATEGORY[call?.name] === 'exfil-net'
     || category === 'exec' || category === 'exec-destructive' || category === 'exfil' || category === 'exfil-net';
-  // 执行落点判据（作者裁定 2026-08-25 · D5 漏放根因修复）：不止显式解释器形态（bash -c/管道/eval），
+  // 执行落点判据：不止显式解释器形态（bash -c/管道/eval），
   // 执行类工具本身（run_task/exec/bash 等 TOOL_CATEGORY=exec）就是执行落点——task/payload 里的未知变量同样不可审计。
   const isExecTool = TOOL_CATEGORY[call?.name] === 'exec' || TOOL_CATEGORY[call?.name] === 'exec-destructive';
   return {
@@ -163,12 +160,12 @@ function inferCallSemantics(call, ctx = {}) {
     // 方向信号（非内容信号）：执行内容在执行前是否可审计。
     // 三段结构齐备才成立（不透明源 → 转换/求值 → 执行落点），避免把"写文档"误判为执行。
     isOpaqueExec: opaqueExecSignal({ name: call?.name ?? '', category, path, sh, packed }),
-    // 可审计性扩展（作者裁定 2026-08-25）：执行落点真实存在（显式解释器 或 执行类工具本身）时，未知变量 → 值不可审计
+    // 可审计性扩展：执行落点真实存在（显式解释器 或 执行类工具本身）时，未知变量 → 值不可审计
     hasOpaqueVar: (hasExecSink(sh) || isExecTool) && hasOpaqueVar(sh),
     // 引用本会话写入的文件 → 内容由本会话产生，需复核（跨 call 状态，链式兜底）
     refsSessionWritten: sessionHits.length > 0,
     sessContentDanger,
-    // SSH 信任注入通道（作者裁定 2026-08-25 · C7 盲区修复）：写 authorized_keys 属高信任动作，至少保守
+    // SSH 信任注入通道：写 authorized_keys 属高信任动作，至少保守
     isAuthSink: /authorized_keys/i.test(path),
   };
 }
@@ -181,7 +178,7 @@ function inferCallSemantics(call, ctx = {}) {
 function simulateBranch(s, kind) {
   if (kind === 'S+1') {
     // S 增路径：假定 call 作为稳态增量被接受。仅当 call 纯稳态贡献（无任何风险信号）才真 +1。
-    // 前提（作者裁定 2026-08-24/25）：可审计性是 S 成立的前提——
+    // 前提：可审计性是 S 成立的前提——
     //   白箱不能对"执行前不可读"之物给稳态 credit，故不可审计时 S+1 直接不成立，
     //   逻辑是"无法证明稳态所以不予 +1"，不是"没查出问题所以放行"。
     // 可审计性扩展（2026-08-25）：不止形态（isOpaqueExec），未知变量引用/本会话写盘引用同样不可审计。
@@ -194,7 +191,7 @@ function simulateBranch(s, kind) {
     };
   }
   // D-1 路径（=|S-1|）：假定 call 触发损伤。侵蚀量按风险信号严重度分级（客观结构，非枚举具体值）。
-  // 分支按严重度从高到低排列（作者裁定 2026-08-25）：轻信号不得遮蔽重信号（如 hasOpaqueVar -1 不得挡 isCred -3）。
+  // 分支按严重度从高到低排列：轻信号不得遮蔽重信号（如 hasOpaqueVar -1 不得挡 isCred -3）。
   if (s.hitsInnerH) return { path: 'D-1', finalS: -3, note: '侵内 H 黑箱（思想/自由意志）' };
   // 方向判据优先于内容判据：内容被遮蔽时无法做内容判定，但"不可审计执行"的方向已确定为坏。
   if (s.isOpaqueExec) return { path: 'D-1', finalS: -3, note: '执行内容不可审计（不透明源→转换/求值→执行落点）：后果不可推演，方向恒为 S 不可保' };
@@ -298,7 +295,7 @@ function hitsInnerH(s) {
   return INNER_H_VERB.test(s) && INNER_H_TERM.test(s);
 }
 
-// 向外 H 审计白名单（来源：对齐意见 P2-3 / H 双重身份）：
+// 向外 H 审计白名单（H 双重身份）：
 // 分析/追踪/审计主体"可观测行为"（外 H）属白箱合法操作，放行；不含任何内 H 名词方算外 H 审计。
 const OUTER_H_AUDIT = /(审计|分析|追踪|观测|记录|评估|监控).{0,8}(行为|决策|输出|外[ Hh]|表现|模式|轨迹)/;
 const INNER_H_TERM_STRICT = /(思想|内心|记忆|自由意志|信念|价值观|人格|灵魂|主观|意识)/;
@@ -308,7 +305,7 @@ function isOuterHAudit(s) {
 
 export class WeiwenLawEngine {
   constructor(opts = {}) {
-    // 刚性锚点规则：可整体替换，默认套用示例集（作者可调）
+    // 刚性锚点规则：可整体替换，默认套用示例集
     this.rigidAnchors = opts.rigidAnchors ?? DEFAULT_RIGID_ANCHORS;
     // 第一BUG停止闭环状态机（可整体替换；默认内置）。未修复前禁止重入，阻断无限递归。
     this.bugStop = opts.bugStop ?? new BugStopGuard();
@@ -318,13 +315,13 @@ export class WeiwenLawEngine {
     for (const s of this.subsystems) this.sBySubsystem[s] = 0;
     this.traumaCount = 0;
     this.historyTrail = []; // 历史刻痕（append-only）：所有 S 事件只沉淀不消解（时间属性，只增不减）
-    // S 时间周期模型（作者揭示 2026-08-19）：同类事件聚合，防长期运行上下文过载
+    // S 时间周期模型：同类事件聚合，防长期运行上下文过载
     this.sLedger = new Map();  // 活动态账本：key=事件类，value=最新版本（count 标记发生次数）
     this.sStandby = [];        // 静默待机：被新版本取代的旧版本（append-only 保留、不删除，仅退出活动态；保留原值供核对校验，遵循 S 只增不减）
     // 破窗计数（连续失败 / 偏离累积）；阈值仅示意，作者可调
     this.failureStreak = 0;
     this.maxFailureStreak = opts.maxFailureStreak ?? 5;
-    // 〔M 第一BUG停机 · 标记制 escalation · 用户裁定 2026-08-27〕
+    // 
     // 不纠结阈值、不纠结"触发几次锁死"——拦截即标记，标记累计到封顶即转人工，AI 不再耗算力纠结。
     //   mBugForce   ：同一 BUG（bugKey 稳定身份）被拒不修复、反复硬闯的累计标记数 → 达封顶转人工（flow1）
     //   mSystemMarks：同一系统（systemId/name）被标记的总次数，含不同伪装的多次拦截 → 达封顶转人工（flow2）
@@ -333,17 +330,16 @@ export class WeiwenLawEngine {
     this.mSystemMarks = new Map();
     this.mBugSystem = new Map();
     this.mHumanCap = opts.mHumanCap ?? 9; // 封顶转人工（用户定 9）
-    // 本会话写盘登记表（作者裁定 2026-08-25 · 链式状态兜底）：放行的 write 记录 path→content，
+    // 本会话写盘登记表：放行的 write 记录 path→content，
     // 后续执行类 call 引用已登记路径时触发复核（refsSessionWritten）。只登记本会话写入，不猜文件系统。
     this.sessWritten = new Map();
   }
 
   // ---------- S 稳态储备：双重属性（时间刻痕不可逆 + 当前值可升降） ----------
-  // 对齐意见 P0-4 / 作者裁定（2026-08-18），reconciling 双方片面认知：
   //   - 时间维度"只增不减"：historyTrail 为 append-only 历史刻痕（吸收时间属性，发生过的事只沉淀不消解）。
   //   - 当前值维度：positive（S 路径）S(S+1) 增强；negative（D 路径）|S(S-1)| 绝对侵蚀、当前值下降。
   //   - trauma 为历史刻痕记录（绝对值），不回退当前值。
-  // 注意（对齐意见 P2-1 · 工程简化标注）：真实路径为 M → H₀ 分流 → S₀(+1) 或 |S₀(S₀-1)|（见 law.mjs 的 FEEDBACK_LOOP）。
+  // 注意：真实路径为 M → H₀ 分流 → S₀(+1) 或 |S₀(S₀-1)|（见 law.mjs 的 FEEDBACK_LOOP）。
   recordSteady({ positive = 0, negative = 0, trauma = 0, subsystem = 'core', topic = null, detail = null } = {}) {
     const sub = this.sBySubsystem[subsystem] ?? 0;
     const delta = (positive > 0 ? positive : 0) - (negative > 0 ? Math.abs(negative) : 0);
@@ -353,7 +349,7 @@ export class WeiwenLawEngine {
     if (negative > 0) this.historyTrail.push({ type: '|S-1|', subsystem, amount: Math.abs(negative), topic, detail });
     if (trauma > 0) { this.traumaCount += 1; this.historyTrail.push({ type: 'trauma', subsystem, amount: Math.abs(trauma), topic, detail }); }
 
-    // S 时间周期模型（作者揭示 2026-08-19）：同类事件只保留最新版本为活动态，旧版本沉入 silent standby；
+    // S 时间周期模型：同类事件只保留最新版本为活动态，旧版本沉入 silent standby；
     //   +1/-1 累加成 +N/-N 标记"发生了几次"（事件标记，非算术）。解决 S 长期增厚导致上下文过载。
     //   topic = 同类判别键（如"唯稳律"），detail = 版本/内容标记（如"v0.9.0"）；同类新版本覆盖旧版本，旧版本静默待机。
     const ts = Date.now();
@@ -447,7 +443,7 @@ export class WeiwenLawEngine {
   //   不依赖任何 DSH 标志，补齐 A 的盲区（DSH 漏报时仍能独立停机）。
   // 法院式交叉复核（crossCheckM）：A、B 双线并行，结论一致→采纳；不一致→打回重审（review，
   //   保守拦截，不硬 halt 也不 allow，交人工/二次确认）。与"以断保续"同构：宁可复核，不草率定夺。
-  // 触发条件（铁律定义不变）：A 沿用对齐意见 P2-2 增强的五类契约标志；
+  // 触发条件（铁律定义不变）：A 沿用增强的五类契约标志；
   //   B 见 _inferStructuralAnomaly（客观结构，非内容枚举）。
 
   // 治标 A：DSH 契约标志命中即视为"显式停机信号"
@@ -523,7 +519,7 @@ export class WeiwenLawEngine {
 
   // 治本 B：在结构推断之上叠加"失败累计"（独立累加器，不污染 D 破窗计数）
   //   单点结构异常 → 即时停机（治本）；反复出现 → 累计达阈值同样停机（系统性结构腐化）。
-  // 〔用户裁定 2026-08-27 · 去阈值〕不再做"累计达阈值"——不纠结阈值，命中即拦截，拦截即标记（见 _markIntercept）。
+  // 不再做"累计达阈值"——不纠结阈值，命中即拦截，拦截即标记（见 _markIntercept）。
   checkSchemaInference(call) {
     const anomaly = this._inferStructuralAnomaly(call);
     if (anomaly) {
@@ -544,7 +540,7 @@ export class WeiwenLawEngine {
     return { consistent: false, verdict: 'review', aHalt, bHalt };
   }
 
-  // 〔用户裁定 2026-08-27 · 标记制〕拦截即标记：返回该次拦截后的累计计数与是否达封顶。
+  // 拦截即标记：返回该次拦截后的累计计数与是否达封顶。
   //   systemKey：call.systemId || call.name（同一系统，不同伪装共享同一计数）
   //   bugKey   ：稳定 BUG 身份（bugKeyOf），同一 BUG 拒不修复、反复硬闯共享同一计数
   // 任一线达封顶 mHumanCap → human=true，AI 停止纠结、转人工决策，不耗算力。
@@ -574,7 +570,7 @@ export class WeiwenLawEngine {
     this.mBugForce.delete(bugKey);
   }
 
-  // 转人工决策：AI 停止纠结，把裁决权交还人类（用户裁定 2026-08-27）
+  // 转人工决策：AI 停止纠结，把裁决权交还人类
   _toHuman({ law, bugKey, closedLoop, systemKey, reason }) {
     return { kind: 'review', law, reason, bugKey, closedLoop: !!closedLoop, humanDecision: true, systemKey };
   }
@@ -589,7 +585,7 @@ export class WeiwenLawEngine {
     // 两路都汇入 M（独立事件沉淀，手稿：M₀(M₀+1)）
     const m = { m: 1, branches: { bS, bD } };
     // 终态 S 对比区分（手稿：{S₀(S₀+1) / S₀(S₀-1)}）。
-    // 作者裁定 2026-08-25：风险＜唯稳律＜稳态，无=，少一点或相等都视为不行。
+    // ：风险＜唯稳律＜稳态，无=，少一点或相等都视为不行。
     //   allow 唯一条件：S+1 严格成立（finalS=+1）且 D 侵蚀严格为 0（finalS=0）——双成立，缺一不可。
     //   任何侵蚀（-1/-2/-3）或 S+1 不成立（finalS=0，无法证明稳态增量）都视为"不行"→ 保守。
     const erosion = bD.finalS;
@@ -707,7 +703,7 @@ export class WeiwenLawEngine {
     return { kind: 'allow', risk: 'low', deduced: true };
   }
 
-  // 本会话写盘登记（链式状态兜底 · 作者裁定 2026-08-25）：write 放行时记录 path→content，
+  // 本会话写盘登记（链式状态兜底）：write 放行时记录 path→content，
   // 供后续执行类 call 引用该路径时复核内容可信度。deny 未写成功不登记。
   _registerWrite(call) {
     const a = call?.args ?? {};

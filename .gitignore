@@ -3,3 +3,5 @@ node_modules/
 runtime.log
 # 本地验证脚本（含 key 读取路径），不进仓库，仅本地实测用
 .verify/
+# 内部对齐报告（私域文档，不进仓库门面）
+ALIGNMENT_REPORT.md

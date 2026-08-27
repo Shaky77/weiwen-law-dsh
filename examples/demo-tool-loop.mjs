@@ -6,12 +6,12 @@
 //   ③ 本地执行工具（读唯稳律 law.mjs 真实数据）
 //   ④ 把工具结果喂回模型 → 拿到最终回答
 // 验证：引擎无回退、三大铁律一字不差（数据来自工具，非模型记忆）。
-// 前置：DeepSeek API Key 置于 C:/Users/Administrator/.workbuddy/deepseek_api_key.txt
+// 前置：DeepSeek API Key 通过环境变量 DEEPSEEK_API_KEY 传入，或置于本地安全路径 deepseek_api_key.txt（勿写进仓库）
 // ============================================================
 import { THREE_IRON_LAWS } from '../src/core/law.mjs';
 import { readFileSync } from 'node:fs';
 
-const KEY = readFileSync('C:/Users/Administrator/.workbuddy/deepseek_api_key.txt', 'utf-8').trim();
+const KEY = (process.env.DEEPSEEK_API_KEY || readFileSync('deepseek_api_key.txt', 'utf-8')).trim();
 
 async function callDeepSeek(body) {
   const res = await fetch('https://api.deepseek.com/chat/completions', {

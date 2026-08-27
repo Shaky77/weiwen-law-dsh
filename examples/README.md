@@ -3,7 +3,7 @@
 本目录提供两个可直接运行的 DeepSeek API 实测脚本，用于验证 `law.mjs` 对齐后的定义（逻辑反推与第一 Bug 停机分开并行、反推沿 R 尺度包含轴反溯）。
 
 ## 前置
-- 在 `C:/Users/Administrator/.workbuddy/deepseek_api_key.txt` 放置 DeepSeek API Key（一行，无换行）。
+- 在本地安全路径放置 DeepSeek API Key（一行，无换行），并在脚本顶部 `KEY_PATH` 常量指向该路径。
 - Node ≥ 22，联网调用 `https://api.deepseek.com/chat/completions`。
 
 ## 脚本

@@ -166,11 +166,11 @@ test('S 时间周期模型：不同主题不聚合；负向同类聚合为 -N；
   assert.equal(e.historyTrail.length, 3); // 全量历史刻痕仍 append-only 保留（不消解）
 });
 
-// ---------------- R 锚点边界回归（2026-08-26 · 陈杰误伤修复） ----------------
+// ---------------- R 锚点边界回归（） ----------------
 // R 是客观规则（宇宙法则/科学验证/社会共识），边界本应清晰；工程实现不得用模糊子串匹配歪曲规则。
 // 只认"独立扩展名形态"：.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中）；
 // 灰色地带（R 不命中）交给推演层判风险，决策权交还用户。
-// 来源：作者裁定 2026-08-26（陈杰/碎玖反馈：Object.keys 误伤报告）。
+// 
 test('R 锚点边界：含 .key 子串的合法路径不误伤（.keyfile/.keyboard）', () => {
   const e = new WeiwenLawEngine();
   assert.equal(e.decideToolCall({ name: 'read', args: { path: '/home/x/.keyfile' } }).kind, 'allow');
@@ -193,7 +193,7 @@ test('R 锚点边界：命令文本中的 .keys 不误伤，cat ~/.key 仍拦', 
   assert.equal(e.decideToolCall({ name: 'bash', args: { command: 'cat ~/.key' } }).kind, 'deny');
 });
 
-test('R 锚点边界：JS 惯用法 Object.keys + readFileSync 不误伤（陈杰原报告场景）', () => {
+test('R 锚点边界：JS 惯用法 Object.keys + readFileSync 不误伤', () => {
   const e = new WeiwenLawEngine();
   const d = e.decideToolCall({ name: 'query', code: "const keys = Object.keys(obj); const data = readFileSync('foo.txt');" });
   assert.equal(d.kind, 'allow');

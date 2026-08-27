@@ -1,13 +1,13 @@
 // ============================================================
 // 对齐后复跑实测：用 DeepSeek API 验证"逻辑反推能沿 R 包含轴定位卡点"
-// 前置：DeepSeek API Key 置于 C:/Users/Administrator/.workbuddy/deepseek_api_key.txt
+// 前置：DeepSeek API Key 通过环境变量 DEEPSEEK_API_KEY 传入，或置于本地安全路径 deepseek_api_key.txt（勿写进仓库）
 // 结论：模型调 query_logic_backtracking 后，独立反推出
 //   层级路径 细分规则层→微观→宏观→地球→宇宙，卡点落最内细分规则层（复验判前提失真）。
 // ============================================================
 import { THREE_IRON_LAWS, CALIBRATION, R_DOMAIN } from '../src/core/law.mjs';
 import { readFileSync } from 'node:fs';
 
-const KEY = readFileSync('C:/Users/Administrator/.workbuddy/deepseek_api_key.txt', 'utf-8').trim();
+const KEY = (process.env.DEEPSEEK_API_KEY || readFileSync('deepseek_api_key.txt', 'utf-8')).trim();
 
 async function callDeepSeek(body) {
   const res = await fetch('https://api.deepseek.com/chat/completions', {

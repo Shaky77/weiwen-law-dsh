@@ -5,12 +5,12 @@
 // 治本 B（checkSchemaInference）：引擎独立结构推断（schema 比对），不依赖 DSH 标志，补盲区。
 // 法院交叉复核（crossCheckM）：双线并行结论对照——一致→采纳；不一致→打回重审（review）。
 //
-// 标记制 escalation（用户裁定 2026-08-27）：不纠结阈值、不纠结"触发几次锁死"，
+// 标记制 escalation：不纠结阈值、不纠结"触发几次锁死"，
 //   拦截即标记；同一 BUG 反复硬闯 / 同一系统多次伪装，标记累计达封顶 9 → 转人工决策，AI 停止纠结。
 //   flow1：同一 BUG 拒不修复、硬闯 9 次 → 转人工
 //   flow2：同一系统 9 次不同伪装（每次拦截都标记）→ 转人工
 //
-// 来源：作者揭示（夏祺 / Shaky77）；设计由用户裁定（2026-08-27 · 9 图讨论"治标 vs 治本 + 法院结构"）。
+// 
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

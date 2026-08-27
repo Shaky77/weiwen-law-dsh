@@ -1,6 +1,6 @@
 // 唯稳律（Weiwen's Law）宿主框架插件入口（纯 ESM）
 // 承载形态：拦截钩子（硬性护栏）+ 工具集（白箱自查）
-// 来源：作者揭示（夏祺 / Shaky77）。框架本体严格本位，不软化、不篡改。
+// 
 //
 // 真实 API（已对照 dsh-tools / dsh-agent 包内类型与源码校正）：
 //   - 工具调用前置闸门：ctx.on('tools/pre-execute', (exec, next) => Promise<PreToolDecision>)
@@ -154,7 +154,7 @@ function apply(ctx) {
     },
   }));
 
-  // 第一BUG停止闭环状态机白箱自查（作者补全 2026-08-21）
+  // 第一BUG停止闭环状态机白箱自查
   ctx.tools.register(defineTool({
     name: 'query_bugstop',
     description: '查询第一BUG停止闭环状态机：当前有哪些故障环节已停但未修复（halted 但未 resolved），各自缺失步骤（逻辑反推/溯源标记/解决修复）。用于白箱观测闭环是否闭合，避免"只反推不修复→无限递归"。',
