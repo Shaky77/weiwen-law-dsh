@@ -1,5 +1,7 @@
 # dsh-weiwen-law-plugin
 
+> ✅ **Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)** — DeepSeek Harness 精选插件列表
+
 **唯稳律通用因果引擎（白箱呈现）** —— 以 **DeepSeek Harness（DSH）** 的 Cordis 插件形态实现。
 
 > **框架定义：守真 · 稳态**（Keep Integrity & Steady State）。

@@ -47,3 +47,4 @@
 ## 另见（非压测证据）
 
 - [weiwen-vs-market-causal.md](weiwen-vs-market-causal.md) —— 通用型因果定位：唯稳律与市面「因果」方案的区别（prior-art 对照与诚实边界）。
+- [legal-causal-test/](legal-causal-test/) —— 跨法域因果实测（2026-08-27）：16 真实判例场景（美/英陪审团 vs 中法官制）跑真实引擎，结构判定完全一致，证法域中性。

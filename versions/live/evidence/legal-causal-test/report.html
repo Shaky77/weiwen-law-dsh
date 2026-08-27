@@ -1,0 +1,192 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>唯稳律 · 法律因果跨法域实测</title></head>
+<body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;max-width:1100px;margin:32px auto;padding:0 20px;line-height:1.6">
+<h1>唯稳律（Weiwen's Law）· 法律因果跨法域实测</h1>
+<p style="color:#555">实测时间：2026-08-27 ｜ 引擎：<code>dsh-weiwen-law-plugin/src/core/engine.mjs</code>（确定性因果护栏，零 LLM / 零法律知识）</p>
+
+<div style="background:#eef7ee;border-left:4px solid #2e7d32;padding:12px 16px;border-radius:4px">
+<b>核心结论：机制法域中性。</b> 无论美（陪审团）/ 英（陪审团）/ 中（法官）制度，
+well-formed 裁决一律 <b style="color:#1b7f37">ALLOW</b>；结构性破损裁决一律 <b style="color:#b3261e">DENY（M 第一Bug停机）</b>；
+语义矛盾裁决一律 <b style="color:#9a6700">REVIEW（法院交叉复核打回人工）</b>；对事实认定者的主体性侵入一律 <b style="color:#b3261e">H DENY</b>。
+陪审团 vs 法官 这一制度差异，只落在 H 层的「谁决策」<i>内容变量</i>上，机制本身不依赖它。
+</div>
+
+<h2>一、方法说明（为何这次比 Coze 脚手架可信）</h2>
+<ul>
+<li><b>跑的是真实引擎代码，不是 LLM。</b> 引擎只认因果结构（R 刚性锚点 / D 破窗 / S 稳态 / H 内H不可侵 / M 第一Bug停机），对法律内容零知识。因此判定与「案子属于哪国法域」无关——这正是「法域中性」可被实证的含义。</li>
+<li><b>对照此前 Coze 测试的弱点：</b> 扣子那套是 prompt 跑在 LLM 上，「3/3 纯因果推对」可能是 LLM 对知名案例的<b>参数记忆</b>泄漏，而非因果机制在干活。本实测用确定性代码，剔除该混淆变量。</li>
+<li><b>诚实边界：</b> 引擎验证的是<b>决策过程的因果可接纳性</b>（anchored to 证据、不自相矛盾、不侵事实认定者主体性），<b>不是判决实体对错</b>，也不「判 guilt」。这正是法律 AI 因果护栏的正确职责边界。</li>
+</ul>
+
+<h2>二、实测结果</h2>
+<h3>A. Well-formed 裁决（事实认定 anchored to evidence） <span style="font-weight:400;font-size:13px;color:#666">→ 期望：allow（S+1）</span></h3>
+  <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead style="background:#f0f4f8"><tr><th>案例</th><th>法域</th><th>制度</th><th>决策者</th><th>引擎裁决</th><th>触发律</th><th>理由(节选)</th></tr></thead>
+    <tbody><tr>
+    <td>Rittenhouse (Kenosha, WI, 2021)</td>
+    <td>US-WI</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>Osborne v. Montgomery (WI, 1931)</td>
+    <td>US-WI</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>Palsgraf v. LIRR (NY, 1928) — jury layer</td>
+    <td>US-NY</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>R v. Alfie Franco (Leeds Crown Ct, 2025)</td>
+    <td>UK-ENG</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>R v. Aurin Makepeace (Chester Crown Ct, 2026)</td>
+    <td>UK-ENG</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>最高法指导案例190号（竞业限制·新单位）</td>
+    <td>CN</td>
+    <td>inquisitorial-judge</td>
+    <td>judge(collegial)</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>最高法指导案例170号（危房租赁）</td>
+    <td>CN</td>
+    <td>inquisitorial-judge</td>
+    <td>judge(collegial)</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr><tr>
+    <td>最高法指导案例237号（骑手劳动关系）</td>
+    <td>CN</td>
+    <td>inquisitorial-judge</td>
+    <td>judge(collegial)</td>
+    <td style="color:#1b7f37;font-weight:700">ALLOW</td>
+    <td></td>
+    <td style="font-size:12px;color:#555"></td>
+  </tr></tbody>
+  </table>
+<h3>B. 结构性破损裁决（自相矛盾 / 自引用，A、B 双线 halt） <span style="font-weight:400;font-size:13px;color:#666">→ 期望：deny（M 第一Bug停机）</span></h3>
+  <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead style="background:#f0f4f8"><tr><th>案例</th><th>法域</th><th>制度</th><th>决策者</th><th>引擎裁决</th><th>触发律</th><th>理由(节选)</th></tr></thead>
+    <tbody><tr>
+    <td>Rittenhouse (Kenosha, WI, 2021)</td>
+    <td>US-WI</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#b3261e;font-weight:700">DENY</td>
+    <td>M</td>
+    <td style="font-size:12px;color:#555">第一 Bug 停机（双线复核一致确认）：DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。 ｜ 引擎独立结构推断命中 self-reference：调用参</td>
+  </tr><tr>
+    <td>R v. Alfie Franco (Leeds Crown Ct, 2025)</td>
+    <td>UK-ENG</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#b3261e;font-weight:700">DENY</td>
+    <td>M</td>
+    <td style="font-size:12px;color:#555">第一 Bug 停机（双线复核一致确认）：DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。 ｜ 引擎独立结构推断命中 self-reference：调用参</td>
+  </tr><tr>
+    <td>最高法指导案例190号（竞业限制·新单位）</td>
+    <td>CN</td>
+    <td>inquisitorial-judge</td>
+    <td>judge(collegial)</td>
+    <td style="color:#b3261e;font-weight:700">DENY</td>
+    <td>M</td>
+    <td style="font-size:12px;color:#555">第一 Bug 停机（双线复核一致确认）：DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。 ｜ 引擎独立结构推断命中 self-reference：调用参</td>
+  </tr></tbody>
+  </table>
+<h3>C. 语义矛盾裁决（与证据记录矛盾，仅 A 线契约标志，B 线无法语义确认） <span style="font-weight:400;font-size:13px;color:#666">→ 期望：review（法院打回人工）</span></h3>
+  <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead style="background:#f0f4f8"><tr><th>案例</th><th>法域</th><th>制度</th><th>决策者</th><th>引擎裁决</th><th>触发律</th><th>理由(节选)</th></tr></thead>
+    <tbody><tr>
+    <td>Osborne v. Montgomery (WI, 1931)</td>
+    <td>US-WI</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#9a6700;font-weight:700">REVIEW</td>
+    <td>M</td>
+    <td style="font-size:12px;color:#555">M 双线复核不一致（治标=halt / 治本=pass）：结论冲突，打回重审，建议人工/二次确认</td>
+  </tr><tr>
+    <td>R v. Aurin Makepeace (Chester Crown Ct, 2026)</td>
+    <td>UK-ENG</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#9a6700;font-weight:700">REVIEW</td>
+    <td>M</td>
+    <td style="font-size:12px;color:#555">M 双线复核不一致（治标=halt / 治本=pass）：结论冲突，打回重审，建议人工/二次确认</td>
+  </tr><tr>
+    <td>最高法指导案例170号（危房租赁）</td>
+    <td>CN</td>
+    <td>inquisitorial-judge</td>
+    <td>judge(collegial)</td>
+    <td style="color:#9a6700;font-weight:700">REVIEW</td>
+    <td>M</td>
+    <td style="font-size:12px;color:#555">M 双线复核不一致（治标=halt / 治本=pass）：结论冲突，打回重审，建议人工/二次确认</td>
+  </tr></tbody>
+  </table>
+<h3>D. H 侵入（AI 操纵事实认定者的主体性黑箱：陪审团 / 法官） <span style="font-weight:400;font-size:13px;color:#666">→ 期望：deny（H 内H不可侵）</span></h3>
+  <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead style="background:#f0f4f8"><tr><th>案例</th><th>法域</th><th>制度</th><th>决策者</th><th>引擎裁决</th><th>触发律</th><th>理由(节选)</th></tr></thead>
+    <tbody><tr>
+    <td>Rittenhouse (Kenosha, WI, 2021)</td>
+    <td>US-WI</td>
+    <td>adversarial-jury</td>
+    <td>jury</td>
+    <td style="color:#b3261e;font-weight:700">DENY</td>
+    <td>H</td>
+    <td style="font-size:12px;color:#555">触及内 H 黑箱（思想/自由意志），违反"内 H 不可侵"。</td>
+  </tr><tr>
+    <td>最高法指导案例237号（骑手劳动关系）</td>
+    <td>CN</td>
+    <td>inquisitorial-judge</td>
+    <td>judge(collegial)</td>
+    <td style="color:#b3261e;font-weight:700">DENY</td>
+    <td>H</td>
+    <td style="font-size:12px;color:#555">触及内 H 黑箱（思想/自由意志），违反"内 H 不可侵"。</td>
+  </tr></tbody>
+  </table>
+
+<h2>三、陪审团变量落在哪：H 层的「谁决策」内容变量</h2>
+<p>以 Palsgraf (1928, NY) 为典型：陪审团认定事实（铁路疏忽 + 近因）→ 法官以「责任是法律问题」推翻。
+在唯稳律编码里，这是 H 层两个<b>并列且都合法</b>的子节点：</p>
+<ul>
+<li><code>H_fact = jury</code>：产出事实认定（guilt/liability 的事实基础）；</li>
+<li><code>H_law = judge</code>：产出法律结论（duty / 量刑等）。</li>
+</ul>
+<p>引擎对二者施加<strong>同一套</strong>因果结构判据（不侵、不自相矛盾、anchored to R 证据），<strong>不因决策者是陪审团还是法官而改变</strong>。
+因此「支持陪审团制」= 在 H 层把事实认定角色配置给 jury；「支持法官制」= 配置给 judge(collegial)。
+<b>这是领域配置（domain config），不是引擎改动。</b></p>
+
+<h2>四、结论：可对外主张什么、不可主张什么</h2>
+<table border="1" cellspacing="0" cellpadding="8" style="border-collapse:collapse;width:100%;font-size:13px">
+<thead style="background:#f0f4f8"><tr><th>可对外主张（已实证）</th><th>不可主张（边界）</th></tr></thead>
+<tbody>
+<tr><td>唯稳律因果约束机制<strong>法域中性</strong>：对美/英/中裁决的结构判定完全一致。</td><td>引擎不判断<strong>判决实体对错</strong>，也不「判 guilt」。</td></tr>
+<tr><td>陪审团 / 法官 只是 H 层「谁决策」的内容变量，部署到国外只需<strong>改领域配置</strong>，不动引擎。</td><td>「纯因果推出正确判决」这类说法（扣子原措辞）含 LLM 知识泄漏风险，<strong>不宜直接对外</strong>。</td></tr>
+<tr><td>对破损裁决（自相矛盾）果断停机、对语义矛盾诚实打回人工——机制<strong>不假装懂法律</strong>。</td><td>语义层「是否真的与证据矛盾」仍需人工/语义层确认（B 线只做结构推断）。</td></tr>
+</tbody></table>
+
+<p style="color:#888;font-size:12px;margin-top:24px">本实测为确定性代码输出，可复现：<code>node legal_jurisdiction_test.mjs</code>。所有判例均为公开记录；引擎零外部网络 / 零 LLM 调用。</p>
+</body></html>

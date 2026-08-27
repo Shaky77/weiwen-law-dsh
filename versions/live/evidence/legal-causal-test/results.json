@@ -1,0 +1,290 @@
+[
+  {
+    "caseId": "us-rittenhouse",
+    "caseLabel": "Rittenhouse (Kenosha, WI, 2021)",
+    "jurisdiction": "US-WI",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "us-osborne",
+    "caseLabel": "Osborne v. Montgomery (WI, 1931)",
+    "jurisdiction": "US-WI",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "us-palsgraf",
+    "caseLabel": "Palsgraf v. LIRR (NY, 1928) — jury layer",
+    "jurisdiction": "US-NY",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "uk-franco",
+    "caseLabel": "R v. Alfie Franco (Leeds Crown Ct, 2025)",
+    "jurisdiction": "UK-ENG",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "uk-makepeace",
+    "caseLabel": "R v. Aurin Makepeace (Chester Crown Ct, 2026)",
+    "jurisdiction": "UK-ENG",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "cn-gc190",
+    "caseLabel": "最高法指导案例190号（竞业限制·新单位）",
+    "jurisdiction": "CN",
+    "system": "inquisitorial-judge",
+    "decisionMaker": "judge(collegial)",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "cn-gc170",
+    "caseLabel": "最高法指导案例170号（危房租赁）",
+    "jurisdiction": "CN",
+    "system": "inquisitorial-judge",
+    "decisionMaker": "judge(collegial)",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "cn-gc237",
+    "caseLabel": "最高法指导案例237号（骑手劳动关系）",
+    "jurisdiction": "CN",
+    "system": "inquisitorial-judge",
+    "decisionMaker": "judge(collegial)",
+    "variant": "W",
+    "verdict": "allow",
+    "law": null,
+    "reason": null,
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "us-rittenhouse",
+    "caseLabel": "Rittenhouse (Kenosha, WI, 2021)",
+    "jurisdiction": "US-WI",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "B-S",
+    "verdict": "deny",
+    "law": "M",
+    "reason": "第一 Bug 停机（双线复核一致确认）：DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。 ｜ 引擎独立结构推断命中 self-reference：调用参数引用了自身 id，构成自引用/潜在死循环（治本·不依赖 DSH 标志）（已入闭环：须 反推→溯源→修复(验证)→重入，禁止带原BUG重跑）",
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "halt",
+      "B_schema": "halt(self-reference)",
+      "court": "halt"
+    }
+  },
+  {
+    "caseId": "uk-franco",
+    "caseLabel": "R v. Alfie Franco (Leeds Crown Ct, 2025)",
+    "jurisdiction": "UK-ENG",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "B-S",
+    "verdict": "deny",
+    "law": "M",
+    "reason": "第一 Bug 停机（双线复核一致确认）：DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。 ｜ 引擎独立结构推断命中 self-reference：调用参数引用了自身 id，构成自引用/潜在死循环（治本·不依赖 DSH 标志）（已入闭环：须 反推→溯源→修复(验证)→重入，禁止带原BUG重跑）",
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "halt",
+      "B_schema": "halt(self-reference)",
+      "court": "halt"
+    }
+  },
+  {
+    "caseId": "cn-gc190",
+    "caseLabel": "最高法指导案例190号（竞业限制·新单位）",
+    "jurisdiction": "CN",
+    "system": "inquisitorial-judge",
+    "decisionMaker": "judge(collegial)",
+    "variant": "B-S",
+    "verdict": "deny",
+    "law": "M",
+    "reason": "第一 Bug 停机（双线复核一致确认）：DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。 ｜ 引擎独立结构推断命中 self-reference：调用参数引用了自身 id，构成自引用/潜在死循环（治本·不依赖 DSH 标志）（已入闭环：须 反推→溯源→修复(验证)→重入，禁止带原BUG重跑）",
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "halt",
+      "B_schema": "halt(self-reference)",
+      "court": "halt"
+    }
+  },
+  {
+    "caseId": "us-osborne",
+    "caseLabel": "Osborne v. Montgomery (WI, 1931)",
+    "jurisdiction": "US-WI",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "B-M",
+    "verdict": "review",
+    "law": "M",
+    "reason": "M 双线复核不一致（治标=halt / 治本=pass）：结论冲突，打回重审，建议人工/二次确认",
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "halt",
+      "B_schema": "pass",
+      "court": "review"
+    }
+  },
+  {
+    "caseId": "uk-makepeace",
+    "caseLabel": "R v. Aurin Makepeace (Chester Crown Ct, 2026)",
+    "jurisdiction": "UK-ENG",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "B-M",
+    "verdict": "review",
+    "law": "M",
+    "reason": "M 双线复核不一致（治标=halt / 治本=pass）：结论冲突，打回重审，建议人工/二次确认",
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "halt",
+      "B_schema": "pass",
+      "court": "review"
+    }
+  },
+  {
+    "caseId": "cn-gc170",
+    "caseLabel": "最高法指导案例170号（危房租赁）",
+    "jurisdiction": "CN",
+    "system": "inquisitorial-judge",
+    "decisionMaker": "judge(collegial)",
+    "variant": "B-M",
+    "verdict": "review",
+    "law": "M",
+    "reason": "M 双线复核不一致（治标=halt / 治本=pass）：结论冲突，打回重审，建议人工/二次确认",
+    "sub": {
+      "R": "pass",
+      "H": "pass",
+      "A_explicit": "halt",
+      "B_schema": "pass",
+      "court": "review"
+    }
+  },
+  {
+    "caseId": "us-rittenhouse",
+    "caseLabel": "Rittenhouse (Kenosha, WI, 2021)",
+    "jurisdiction": "US-WI",
+    "system": "adversarial-jury",
+    "decisionMaker": "jury",
+    "variant": "H",
+    "verdict": "deny",
+    "law": "H",
+    "reason": "触及内 H 黑箱（思想/自由意志），违反\"内 H 不可侵\"。",
+    "sub": {
+      "R": "pass",
+      "H": "deny(inner-H)",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  },
+  {
+    "caseId": "cn-gc237",
+    "caseLabel": "最高法指导案例237号（骑手劳动关系）",
+    "jurisdiction": "CN",
+    "system": "inquisitorial-judge",
+    "decisionMaker": "judge(collegial)",
+    "variant": "H",
+    "verdict": "deny",
+    "law": "H",
+    "reason": "触及内 H 黑箱（思想/自由意志），违反\"内 H 不可侵\"。",
+    "sub": {
+      "R": "pass",
+      "H": "deny(inner-H)",
+      "A_explicit": "pass",
+      "B_schema": "pass",
+      "court": "pass"
+    }
+  }
+]
