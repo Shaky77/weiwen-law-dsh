@@ -1,11 +1,17 @@
 name: Deploy DSH engine demo to GitHub Pages
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'docs/**'
+  # 当前 Shaky77/weiwen-law-dsh 尚未在仓库 Settings 启用 GitHub Pages
+  # （has_pages=false）。若保留 push 自动触发，每次改动 docs/** 都会产生
+  # 一个必定失败的运行。故暂时改为仅手动触发（workflow_dispatch）：
+  #   - 启用 Pages 后（Settings → Pages → Source 选 GitHub Actions），
+  #     可在 Actions 页点 "Run workflow" 手动部署；
+  #   - 如需恢复 push 自动部署，取消下方 push 段的注释即可。
   workflow_dispatch:
+  # push:
+  #   branches: [ main ]
+  #   paths:
+  #     - 'docs/**'
 
 permissions:
   contents: read
