@@ -8,9 +8,9 @@
 
 ## 一句话定位 · One-line positioning
 
-**唯稳律 = 通用型因果裁决中间件**：只校验因果结构（R→D→S→H→M），对领域内容零知识，故法律、医疗、金融、机器人同一套机制。
+**唯稳律 = 通用型因果裁决中间件**：只校验因果结构（R→S→D→H→M），对领域内容零知识，故法律、医疗、金融、机器人同一套机制。
 
-**Weiwen's Law = a general-purpose causal-adjudication middleware**: it validates only causal structure (R→D→S→H→M) and encodes zero domain content, so law, medicine, finance, and robotics are governed by the same mechanism.
+**Weiwen's Law = a general-purpose causal-adjudication middleware**: it validates only causal structure (R→S→D→H→M) and encodes zero domain content, so law, medicine, finance, and robotics are governed by the same mechanism.
 
 ---
 
