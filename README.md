@@ -37,8 +37,6 @@
 - **领域专用因果护栏**（Causal Safety Engine / LLMGuardrail 等）→ 它们绑领域（安全 / LLM / 幻觉），我们**领域无关**；
 - **跨法域法律因果 AI**（judgeai 等）→ 它们 jurisdiction-**aware**（编码法域、换规范包），我们**法域中性**（根本不编码法域，法律只是抽样领域之一）。
 
-> **定位主张**：通用型（领域无关）因果裁决中间件——**第一且唯一（据公开检索）**。因果赛道长期有人在做、分支领域有成果，但均为领域专用；「通用型 + 因果 + 裁决中间件」交集，公开检索未见同类。
-
 完整双语对照（含 prior-art 出处与诚实边界）：[`versions/live/evidence/weiwen-vs-market-causal.md`](./versions/live/evidence/weiwen-vs-market-causal.md)
 
 ## 快速开始（不依赖 DSH 也能跑）
