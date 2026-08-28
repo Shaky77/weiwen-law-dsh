@@ -64,11 +64,12 @@ Weiwen's Law's real moat is not "uses causality" but "**causality + general-purp
 
 - ✅ **16 个真实跨国判例**（美/英陪审团、中法官制）结构判定完全一致 → 证「通用型 + 法域中性」。
 - ✅ 引擎验证**决策过程的因果可接纳性**，不判领域实体对错（不判 guilt、不判判决正误）。
-- ❌ **不主张「第一 / 唯一」**：「通用型 + 因果 + 裁决中间件」这一交集可能新颖，但须经**正式 prior-art / 专利检索**坐实后再作此主张。
+- ✅ **定位主张（作者拍板 2026-08-28）**：**通用型（领域无关）因果裁决中间件——第一且唯一**（据公开检索）。论证：因果赛道长期有人在做、分支领域有成果，但均为**领域专用**（法律 / LLM / 幻觉 / 安全等，绑定领域内容）；「通用型 + 因果 + 裁决中间件」这一交集，公开检索未见同类。**限定语是「通用型」**：不主张"因果引擎"总体第一，只主张该细分。
+- ❌ 不主张「引擎判判决对错 / 判 guilt」；不主张「因果引擎」总体的第一 / 唯一。
 
 ---
 
 ## 待办 · Follow-up
 
-- 在对外主张「第一 / 唯一」前，完成正式 prior-art 检索（重点查 "general-purpose agent guardrail / causal adjudication middleware" 交集）。
+- 若未来主张进一步升级（如申请专利 / 正式学术宣称），补正式 prior-art 检索坐实（重点查 "general-purpose agent guardrail / causal adjudication middleware" 交集）。
 - 审计现有对外文案（README / Discussion 帖 / 介绍信），将主轴统一为「**通用型因果**」，避免过度强调「因果」、弱化「通用型」。
