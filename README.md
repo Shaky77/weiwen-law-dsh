@@ -41,6 +41,12 @@
 
 完整双语对照（含 prior-art 出处与诚实边界）：[`versions/live/evidence/weiwen-vs-market-causal.md`](./versions/live/evidence/weiwen-vs-market-causal.md)
 
+## 概念注解：H 与「知行合一」
+
+> **作者洞察（2026-08-28）**：**内 H ≈ 知，外 H ≈ 行；知行合一方为最大杠杆**——这同时解释了 H 为何是"唯一可变量 / 唯一主权 / 杠杆点"，以及为何普世中知与行之间"有很大的缝隙"。
+
+完整注解（映射表 + 逐项推导）：[`docs/H-zhixing-heyi-annotation.md`](./docs/H-zhixing-heyi-annotation.md)
+
 ## 快速开始（不依赖 DSH 也能跑）
 
 这条路径直连 DeepSeek API、不依赖 DSH 安装，**已实跑验证可复现**：
