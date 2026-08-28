@@ -1,0 +1,1 @@
+# Treat HTML docs/demos as documentation so GitHub reports JavaScript as the\n# primary language. DSH plugin radar discovery pre-checks package.json and clones repos;\n# an HTML-primary repo can be misclassified and skipped by the discovery pipeline.\n*.html linguist-documentation\n
