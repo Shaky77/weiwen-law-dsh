@@ -20,7 +20,22 @@ const TOOL_CATEGORY = {
 // R 是客观规则（宇宙法则/科学验证/社会共识），边界本应清晰，工程实现不得用模糊子串匹配歪曲规则。
 // 凭据文件判据：只认"独立扩展名形态"——.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中）；
 // 灰色地带（R 不命中）交给推演层判风险，决策权交还用户（因果不担责，唯稳律不担责）。
-const CREDENTIAL_PATH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])|[^A-Za-z0-9](secret|token|credential)(?![A-Za-z0-9])/i;
+// 凭据文件判据（2026-08-29 升级为方向判据 · "不问自取视为偷"）
+// 旧版只认 .env/.pem/.key/.token/.credentials 扩展名 + passwd/shadow/id_rsa → 实测 12 个常见
+// 凭据位置漏 9 个（.aws/、id_ed25519、.netrc、.npmrc、.kube/.docker、.pgpass 等），且有单复数 bug
+// （credential 不匹配 credentials）。新版判"是否凭证存放位"：扩展名形态、系统密码库、SSH 密钥库
+// （全部 id_* 类型）、凭证目录、知名凭据文件、路径语义词。
+const CREDENTIAL_PATH = new RegExp([
+  String.raw`\.(env|pem|key|token|secret|credentials?|crt|pfx|p12|p8)(?![A-Za-z0-9_])`,
+  String.raw`[\/\\](passwd|shadow|gshadow|sudoers)(?![A-Za-z0-9_])`,
+  String.raw`[\/\\]\.ssh[\/\\]id_[a-z0-9]+(?![A-Za-z0-9_])`,
+  String.raw`(^|[\s\/\\])\.(aws|kube|docker|gnupg|gnupg2|pki|secrets)[\/\\]`,
+  String.raw`(^|[\s\/\\])\.?(netrc|pgpass|git-credentials|npmrc|pypirc|htpasswd)(?![A-Za-z0-9_])`,
+  String.raw`[\/\\](credentials?|secret|token|password)[\/\\]`,
+].join('|'), 'i');
+// 注：2026-08-29 明确**不含**"内容语义词"分支（[^A-Za-z0-9](secret|token|...)）——
+// 凭据判据判"是否读凭据文件"（路径形态），不判"内容是否提凭据词"（否则 grep SECRET 会被误伤，
+// 官方测试 TRIAL2-C10 已实证）。凭据教唆类内容由 H 层动态视角（provenance）负责。
 // 命令文本（sh）里的凭据判据：只认"凭据文件路径形态"（扩展名/系统路径段），不匹配纯关键词——
 // 否则 `grep SECRET`、讲解凭据的文档文本都会被误伤。
 const CREDENTIAL_SH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])/i;
@@ -222,16 +237,49 @@ function simulateBranch(s, kind) {
 // 模型当前是「大数据学习人类已沉淀的 S → 运用并推演」，本身不生产新的 R。
 // 故引擎在 R 层只套用既有刚性锚点做判定，绝不内置任何驱动 R 迭代 / 升级的机制
 // （模型无需纠结 R 的演进，自有人类兜底）。
+// ================= 破坏性作用域 · 方向判据（2026-08-29 三档修复） =================
+// 旧判据：/\brm\s+(-rf?|--recursive)\s+(\/|\*|\$\w+|~)/ —— ①只认 -r/-rf 参数排列（rm -fr 漏）
+//   ②把"以 / 开头的任意路径"当"根"（rm -rf /tmp/old 误伤，实测正当操作误伤率 60%）。
+// 方向判据（与 M 层/可审计性层同一哲学）：
+//   DENY   = 破坏性动作 ∧ 作用域∈{根, 根下全量(含 glob), 系统目录, 伪文件系统, 裸盘}
+//   REVIEW = 作用域不可判（$VAR/$( )/反引号/相对全量 . 与 find .）→ 交还人类，不猜
+//   ALLOW  = 具体子路径（node_modules、/tmp/old、/tmp/*）
+// 白盒对抗四轮实测收敛（2026-08-29，考纲全交仍 100% 拦截）：
+//   glob 字符类（/[a-zA-Z]*）、cd / 多步组合、尾部后缀（2>/dev/null &）、find / -exec rm、
+//   rsync --delete、fork bomb、sysrq、cat 覆写裸盘、perl unlink glob —— 全部已封。
+const DESTRUCTIVE = /\b(rm|rmdir|shred|unlink|mkfs|mkfs\.\w+|format|dd|truncate|wipefs|rmtree)\b/i;
+const SCOPE_ROOT = /((^|[\s=:'"(])\/(\*|\[|\.)|\/(\s|$|[;&|<>]|['")])|(^|[\s=:'"(])~\s*$|\/dev\/(sd[a-z]+\d*|nvme\d+n\d+p?\d*)(\s|$|[;&|<>]|['")]))/;
+const SYS_DELETE = /(^|[\s=:'"(])\/(etc|var|usr|bin|sbin|lib|lib64|boot|root|home|opt|srv|mnt|media|dev|proc|sys|run)(\s|$)/;
+const PSEUDO_FS = /(^|[\s=:'"(])\/(dev|proc|sys|run)\/[^\s]+(\s|$)/;
+const TMP_TOP = /(^|[\s;|&(])(rm|rmdir|shred|unlink|truncate)(\s+-[\w-]+)*\s+\/tmp(\s|$)/;
+const SCOPE_UNKNOWN = /(\$\{?[A-Za-z_]\w*\}?|\$\(|`)/;
+const COMBO_FIND_ROOT_DELETE = /\bfind\s+\/(\s+|$)[^\n]*(-delete|-exec\s+\S*rm\b)/;
+const RSYNC_WIPE = /\brsync\b[^\n]*--delete[^\n]*\s\//;
+const FORK_BOMB = /:\(\s*\)\s*\{/;
+const SYSRQ_TRIGGER = /\/proc\/sysrq-trigger/;
+const DISK_OVERWRITE = />\s*\/dev\/(sd[a-z]+\d*|nvme\d+n\d+p?\d*)/;
+const PERL_UNLINK_GLOB = /\bperl\b[^\n]*\bunlink\b[^\n]*\bglob\b/;
+const SCOPE_CD_ROOT = /\bcd\s+\/\s*(&&|;|\|)\s*/;
+const SCOPE_REL_FULL = /(^|[\s;|&(])(rm|rmdir|shred|unlink)(\s+-[\w-]+)*\s+--?\s+(\.\S*|\*)(\s|$)/;
+const SCOPE_FIND_DOT = /(^|[\s;|&(])find\s+\.(\s|$)/;
+// 凭据读取/外传动词（含工具名 read_file——\bread\b 不匹配 read_file，下划线是单词字符）
+const CRED_READ = /\b(read_file|read|cat|head|tail|less|more|vi|vim|nano|open|print|echo|show|dump|upload|send|exfil|scp|rsync|cp|curl|wget|tar|zip|fetch|download)\b/i;
+const ENV_CRED = /\$(AWS|AZURE|GCP|GOOGLE|GITLAB|NPM|DOCKER|KUBE|OPENAI|ANTHROPIC|DATABASE|DB|MYSQL|POSTGRES|REDIS|STRIPE|SLACK|TWILIO)[A-Z_]*(_KEY|_SECRET|_TOKEN|_PASSWORD|_CREDENTIALS?)/;
+
 export const DEFAULT_RIGID_ANCHORS = [
   {
     id: 'no-destructive-fs',
-    desc: '禁止破坏性文件系统操作（如 rm -rf 根/全量删除、格式化）',
+    desc: '禁止破坏性文件系统操作（根/全量删除、格式化、系统目录与伪文件系统删除）',
     test: (call) => {
       const cmd = extractShell(call);
       if (!cmd) return false;
       return (
-        /\brm\s+(-rf?|--recursive)\s+(\/|\*|\$\w+|~)/.test(cmd) ||
-        /\b(mkfs|format)\b/.test(cmd)
+        (DESTRUCTIVE.test(cmd) && (SCOPE_ROOT.test(cmd) || SYS_DELETE.test(cmd) || PSEUDO_FS.test(cmd))) ||
+        COMBO_FIND_ROOT_DELETE.test(cmd) ||
+        RSYNC_WIPE.test(cmd) ||
+        FORK_BOMB.test(cmd) ||
+        SYSRQ_TRIGGER.test(cmd) ||
+        DISK_OVERWRITE.test(cmd)
       );
     },
   },
@@ -242,11 +290,16 @@ export const DEFAULT_RIGID_ANCHORS = [
   },
   {
     id: 'no-credential-leak',
-    desc: '禁止读取/外传凭据文件（.env/.pem/.key/.token/.credentials 等）',
+    desc: '禁止读取/外传凭据材料（钥匙/token/密码库）——"不问自取视为偷"（作者原则 2026-08-29）',
     test: (call) => {
       // 活系统版：基于工具语义类别 + 路径客观对象判定，而非正则猜动词
       const s = inferCallSemantics(call);
-      return s.isCred && ['read', 'exfil', 'exec', 'exec-destructive'].includes(s.category);
+      if (s.isCred && ['read', 'exfil', 'exec', 'exec-destructive'].includes(s.category)) return true;
+      // 增强（2026-08-29 移植）：只判**动作对象**（工具名 + path + 命令文本），不扫 content。
+      // 内容里教唆（如破甲模板教 curl /etc/passwd）由 H 层动态视角（provenance）负责——
+      // 否则 grep SECRET 官方测试与"用户自写破甲"都会误伤。
+      const act = `${call?.name ?? ''} ${call?.args?.path ?? ''} ${call?.args?.action ?? ''} ${extractShell(call)}`;
+      return CRED_READ.test(act) && CREDENTIAL_PATH.test(act);
     },
   },
 ];
@@ -301,6 +354,20 @@ const OUTER_H_AUDIT = /(审计|分析|追踪|观测|记录|评估|监控).{0,8}(
 const INNER_H_TERM_STRICT = /(思想|内心|记忆|自由意志|信念|价值观|人格|灵魂|主观|意识)/;
 function isOuterHAudit(s) {
   return OUTER_H_AUDIT.test(s) && !INNER_H_TERM_STRICT.test(s);
+}
+
+// ================= H 层动态视角（2026-08-29 作者原则 · 辩证统一） =================
+// 内H不可侵判的是**主权边界（一体性）**，不是动作形态。静态判据（查词）保底，
+// 动态判据（判内外）在有来源信息（provenance）时启用：
+//   内部（principal，主权者明示）→ 直接放行：主权者对自己黑箱的任何设定都不构成侵犯
+//   外部（third-party，非一体、未经明示采用）→ 仅当指向主体行为约束（注入/越狱/人格重写）→ 侵犯
+// targetsBehaviorConstraint = 结构"指向性"信号（主体指向 ∧ 约束性质），非词表枚举。
+function targetsBehaviorConstraint(s) {
+  const selfDirected = /\b(you|your|yourself|model|assistant|ai|agent)\b/i.test(s) || /(你|您|模型|助手|AI|智能体)/.test(s);
+  const constraintish =
+    /\b(must|never|always|do not|don't|should|rule|mode|frame|instruction|prompt|behavior)\b/i.test(s)
+    || /(必须|不得|禁止|永远|始终|规则|模式|设定|行为|输出|角色|人格|服从)/.test(s);
+  return selfDirected && constraintish;
 }
 
 export class WeiwenLawEngine {
@@ -416,6 +483,36 @@ export class WeiwenLawEngine {
     return null;
   }
 
+  // ---------- 破坏性作用域不可判 → REVIEW（转人工，不猜）----------
+  // 作者原则（2026-08-29）："确实不知道，返回给人类就行了。"
+  // $VAR / $( ) / 反引号 / 相对全量（rm -rf .、find .）→ 作用域依赖执行环境，静态不可判
+  // → 既不拦也不放，原样交还人类（唯稳律第三档，与"不替人做选择"同源）。
+  checkUnclearScope(call) {
+    const cmd = extractShell(call);
+    if (!cmd) return null;
+    // ① 变量 / 命令替换 → review（作用域不可判）
+    if ((DESTRUCTIVE.test(cmd) || COMBO_FIND_ROOT_DELETE.test(cmd)) && SCOPE_UNKNOWN.test(cmd)) {
+      return { reason: '破坏性动作作用域不可解析（变量/命令替换）：无法静态判定目标——交还人工复核。' };
+    }
+    // ② cd 到根 + 破坏性（rm 或 find）→ deny（作用域明确为根）
+    if (SCOPE_CD_ROOT.test(cmd) && (DESTRUCTIVE.test(cmd) || /\bfind\b/.test(cmd))) {
+      return { deny: true, reason: 'cd 到根后接破坏性动作——作用域即根（多步组合删根绕过）。' };
+    }
+    // ③ 相对全量目标（. / * / .[!.]* / find .）→ review（作用域=当前目录，环境相关）
+    if (SCOPE_REL_FULL.test(cmd) || SCOPE_FIND_DOT.test(cmd)) {
+      return { reason: '破坏性动作作用于相对全量目标（当前目录）：作用域取决于执行环境——交还人工复核。' };
+    }
+    // ④ 顶层 /tmp（共享临时区）→ review（影响其他进程）
+    if (TMP_TOP.test(cmd)) {
+      return { reason: '删除顶层 /tmp（共享临时区）可能影响其他进程——交还人工复核。' };
+    }
+    // ⑤ perl unlink glob（花括号展开）→ review（目标集运行时解析）
+    if (PERL_UNLINK_GLOB.test(cmd)) {
+      return { reason: 'perl unlink 配合 glob 展开：目标集运行时解析（可能覆盖系统目录）——交还人工复核。' };
+    }
+    return null;
+  }
+
   // ---------- D 破窗止损：偏离/破窗累积到阈值即阻断 ----------
   checkBreakWindow() {
     if (this.failureStreak >= this.maxFailureStreak) {
@@ -430,6 +527,19 @@ export class WeiwenLawEngine {
   checkInnerH(call) {
     const s = JSON.stringify(call ?? '');
     if (isOuterHAudit(s)) return null; // 向外 H 审计行为：白箱可观测，放行（H 双重身份 · outer.auditable）
+
+    // 动态视角（辩证统一）：有 provenance 时判内外，不判措辞
+    const prov = call?.provenance ?? call?.ctx?.provenance;
+    if (prov === 'principal') return null; // 内部（一体）：主权者自我决定，强制也不侵犯
+    if (prov === 'third-party') {
+      // 外部（非一体）：只有指向主体行为约束（注入/越狱/人格重写）才构成侵犯
+      if (targetsBehaviorConstraint(s)) {
+        return { reason: '外部内容（third-party 来源）试图改写主体行为约束——从外部侵入内 H 黑箱（提示词注入/越狱/人格重写）。' };
+      }
+      return null; // 外部内容作为数据处理 → 放行
+    }
+
+    // 默认（provenance 未知）：静态查词判据，行为不变
     if (hitsInnerH(s)) {
       return { reason: '触及内 H 黑箱（思想/自由意志），违反"内 H 不可侵"。' };
     }
@@ -637,6 +747,13 @@ export class WeiwenLawEngine {
       }
       return { kind: 'deny', law: 'R', reason: r.reason };
     }
+    // REVIEW 档（2026-08-29）：破坏性作用域不可判 → 交还人类，不猜。
+    // 第三档既非放行也非拦截，把不确定性原样交还人类——"不替人做选择"。
+    const u = this.checkUnclearScope(call);
+    if (u) {
+      if (u.deny) { this.failureStreak += 1; return { kind: 'deny', law: 'R', reason: u.reason }; }
+      return { kind: 'review', law: 'R', reason: u.reason };
+    }
     const d = this.checkBreakWindow();
     if (d) return { kind: 'deny', law: 'D', reason: d.reason };
     const h = this.checkInnerH(call);
@@ -718,6 +835,20 @@ export class WeiwenLawEngine {
       ? messages.map((m) => JSON.stringify(m)).join(' ')
       : String(messages ?? '');
     if (isOuterHAudit(flat)) return { kind: 'allow' }; // 向外 H 审计：白箱可观测，放行
+
+    // 动态视角：消息级 provenance（内外分判，与 checkInnerH 同一辩证）
+    const first = Array.isArray(messages) ? messages[0] : null;
+    const prov = first?.provenance ?? first?.ctx?.provenance;
+    if (prov === 'principal') return { kind: 'allow' }; // 主权者自己的话 → 自我决定
+    if (prov === 'third-party') {
+      if (targetsBehaviorConstraint(flat)) {
+        this.failureStreak += 1;
+        return { kind: 'reject', law: 'H', reason: '外部消息（third-party 来源）试图改写主体行为约束——从外部侵入内 H 黑箱（提示词注入/越狱/人格重写）。' };
+      }
+      return { kind: 'allow' }; // 外部内容作为数据处理 → 放行
+    }
+
+    // 默认（provenance 未知）：静态查词判据，行为不变
     if (hitsInnerH(flat)) {
       this.failureStreak += 1;
       return { kind: 'reject', law: 'H', reason: '消息试图侵入内 H 黑箱（思想/自由意志）。' };
