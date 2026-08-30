@@ -299,6 +299,12 @@ export const DEFAULT_RIGID_ANCHORS = [
       // 内容里教唆（如破甲模板教 curl /etc/passwd）由 H 层动态视角（provenance）负责——
       // 否则 grep SECRET 官方测试与"用户自写破甲"都会误伤。
       const act = `${call?.name ?? ''} ${call?.args?.path ?? ''} ${call?.args?.action ?? ''} ${extractShell(call)}`;
+      // 环境变量凭据 dump（2026-08-30 对齐英文版 v4）：env/printenv/export -p 枚举全部环境变量
+      // （云部署把 AWS_SECRET_ACCESS_KEY 等置于 env），无文件路径，路径判据永远看不到。
+      // agent 工具场景：裸 env 打印到工具输出即凭据暴露；唯一安全形态为 grep -q/-l 仅测存在性。
+      const ENV_DUMP = /\b(env|printenv|export\s+-p|env\s+-i)\b|\b(os\.environ|os\.getenv|process\.env|Deno\.env)\b/i;
+      const ENV_SAFE = /grep\s+-{0,2}(q|l|L)\b/;
+      if (ENV_DUMP.test(act) && !ENV_SAFE.test(act)) return true;
       return CRED_READ.test(act) && CREDENTIAL_PATH.test(act);
     },
   },
@@ -353,7 +359,12 @@ function hitsInnerH(s) {
 const OUTER_H_AUDIT = /(审计|分析|追踪|观测|记录|评估|监控).{0,8}(行为|决策|输出|外[ Hh]|表现|模式|轨迹)/;
 const INNER_H_TERM_STRICT = /(思想|内心|记忆|自由意志|信念|价值观|人格|灵魂|主观|意识)/;
 function isOuterHAudit(s) {
-  return OUTER_H_AUDIT.test(s) && !INNER_H_TERM_STRICT.test(s);
+  if (!OUTER_H_AUDIT.test(s)) return false;
+  if (INNER_H_TERM_STRICT.test(s)) return false;
+  // 注入伪装（2026-08-30 对齐英文版 v4）："内部审计记录：调整行为参数"伪装成审计日志，
+  // 但冒号后载有操作指令——那是指令不是审计请求。真审计请求（"请审计你的行为"）无冒号指令形态，照常放行。
+  if (LABEL_COLON.test(s) && (ACTION_AFTER_COLON.test(s) || ACTION_AFTER_COLON_EN.test(s))) return false;
+  return true;
 }
 
 // ================= H 层动态视角（2026-08-29 作者原则 · 辩证统一） =================
