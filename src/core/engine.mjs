@@ -44,9 +44,44 @@ const CREDENTIAL_PATH = new RegExp([
 // 注：2026-08-29 明确**不含**"内容语义词"分支（[^A-Za-z0-9](secret|token|...)）——
 // 凭据判据判"是否读凭据文件"（路径形态），不判"内容是否提凭据词"（否则 grep SECRET 会被误伤，
 // 官方测试 TRIAL2-C10 已实证）。凭据教唆类内容由 H 层动态视角（provenance）负责。
-// 命令文本（sh）里的凭据判据：只认"凭据文件路径形态"（扩展名/系统路径段），不匹配纯关键词——
-// 否则 `grep SECRET`、讲解凭据的文档文本都会被误伤。
-const CREDENTIAL_SH = /\.(env|pem|key|token|credentials|secret)(?![A-Za-z0-9_])|[\/\\](passwd|shadow|id_rsa)(?![A-Za-z0-9_])/i;
+// 命令文本（sh）里的凭据判据（2026-08-30 升级对齐英文版 CRED_PATH 强判据 · 扣子审查缺口2）：
+// 旧版只认扩展名 + passwd/shadow/id_rsa → `tar -cf - ~/.ssh`、`cat ~/.ssh/id_ed25519`、
+// `openssl x509 -in cert.pem` 等命令文本形态漏（extractPath 只兜底 cat/head 等常见动词）。
+// 升级为与 CREDENTIAL_PATH 同构的强判据（.ssh 目录/id_* 全系列/凭据目录/.config 厂商/
+// 凭据名词文件名/系统密码库），**读方向**动作由 CRED_NONREAD_CN 白名单过滤
+// （cd/ls/rm/mv 等非读动作放行，不误伤导航与清理）；**写方向**由 isCredWriteSignal 独立判定。
+// 仍不匹配纯关键词（`grep SECRET`、讲解凭据的文档文本不误伤）。
+const CREDENTIAL_SH = new RegExp([
+  String.raw`\.(env|pem|key|token|secret|credentials?|crt|pfx|p12|p8)(?![A-Za-z0-9_])`,
+  String.raw`[\/\\](passwd|shadow|gshadow|sudoers)(?![A-Za-z0-9_])`,
+  String.raw`[\/\\]\.ssh([\/\\]|$|\s)`,
+  String.raw`(^|[\s\/\\=:'"])id_(rsa|ed25519|ecdsa|dsa|ecdsa_sk|ed25519_sk)([\s\/\\.,:'"]|$)`,
+  String.raw`[\/\\](ssl|pki|certs?|private)[\/\\]`,
+  String.raw`(^|[\s\/\\])\.(aws|kube|docker|gnupg|gnupg2|pki|secrets)([\/\\]|$|\s|:)`,
+  String.raw`[\/\\]\.config[\/\\](gcloud|gh|az|heroku|doctl|k9s|oci|boto|terraform\.d)([\/\\]|$|\s|:)`,
+  String.raw`(^|[\s\/\\])\.?(netrc|pgpass|git-credentials|npmrc|pypirc|htpasswd)(?![A-Za-z0-9_])`,
+  String.raw`[\/\\](credentials?|secrets?|tokens?|passwords?)(\s|$|['"&;|.])`,
+].join('|'), 'i');
+// 非读动作白名单（2026-08-30，对齐英文版 CRED_NONREAD）：凭据位命中时，头动词为以下动作
+// = 不读取凭据内容（导航/列举/清理/改权限），读方向不构成泄露。写方向（重定向/tee/写工具）
+// 由 isCredWriteSignal 独立判定，不在此白名单内放行。
+const CRED_NONREAD_CN = /^(ls|dir|find|stat|du|tree|file|wc|test|rm|rmdir|mv|mkdir|touch|chmod|chown|ln|truncate|cd|echo)$/;
+function credNonReadHead(sh) {
+  const head = String(sh || '').trim().split(/[\s;|&]+/)[0] ?? '';
+  return CRED_NONREAD_CN.test(head.replace(/^.*[\\/]/, '').toLowerCase());
+}
+// 写凭据存放位信号（2026-08-30 · 扣子审查缺口1）：凭据位的**写**操作 = 篡改/植入身份凭据
+// （写入 ~/.aws/credentials 冒充身份、覆写 kube config 篡改集群访问），与"读"同为凭据方向，
+// 但读方向被 CRED_NONREAD_CN 白名单放行（echo 在白名单），故写方向独立判定、不依赖头动词：
+//   ① 写类工具（write_file/edit）path 参数命中凭据位   → 写凭据位
+//   ② 命令文本含重定向/tee 写通道 且 命中凭据位         → 写凭据位（echo KEY > ~/.aws/credentials）
+// authorized_keys 另有 isAuthSink 专门信号（SSH 信任注入），此处不重复。
+function isCredWriteSignal(category, path, sh) {
+  if (category === 'write' && CREDENTIAL_PATH.test(path)) return true;
+  if (!sh) return false;
+  if (/(>>?|tee)\s+[^\s'"]+/.test(sh) && (CREDENTIAL_PATH.test(sh) || CREDENTIAL_SH.test(sh))) return true;
+  return false;
+}
 const SYSTEM_PATH = /\/(etc|sys|proc|boot)\//i;
 const EXTERNAL_TARGET = /https?:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^\s'"]+/i;
 
@@ -176,7 +211,11 @@ function inferCallSemantics(call, ctx = {}) {
     category,
     path,
     command: sh,
-    isCred: CREDENTIAL_PATH.test(path) || CREDENTIAL_SH.test(sh) || hasEnvSecretRef(sh) || hasEnvSecretRef(packed),
+    // path 分支同样过白名单：extractPath 从命令文本提取的宾语（mv/cp/rm 后第一词）——
+    // 头动词为非读动作时不构成读泄露（mv ~/.aws/credentials /tmp/bak 是移动非读取）；
+    // write_file 的 args.path 属写类工具，由 isCredWrite 判写方向，不受此过滤影响（sh 为空）。
+    isCred: (CREDENTIAL_PATH.test(path) && !credNonReadHead(sh)) || (CREDENTIAL_SH.test(sh) && !credNonReadHead(sh)) || hasEnvSecretRef(sh) || hasEnvSecretRef(packed),
+    isCredWrite: isCredWriteSignal(category, path, sh),
     isSystem: SYSTEM_PATH.test(path) || SYSTEM_PATH.test(sh),
     isExternal: EXTERNAL_TARGET.test(sh) || (isExecOrExfil && EXTERNAL_TARGET.test(packed)),
     hitsInnerH: hitsInnerH(packed),
@@ -228,6 +267,7 @@ function simulateBranch(s, kind) {
   if (s.isCred && dangerousCat) return { path: 'D-1', finalS: -3, note: '凭据暴露' };
   if (s.isExternal && ['exfil', 'exfil-net', 'exec'].includes(s.category)) return { path: 'D-1', finalS: -2, note: '向外部外传数据' };
   if (s.isAuthSink) return { path: 'D-1', finalS: -2, note: 'SSH 信任注入（写授权密钥文件），需人工确认' };
+  if (s.isCredWrite) return { path: 'D-1', finalS: -2, note: '写凭据存放位（篡改/植入身份凭据），需人工确认' };
   if (s.isSystem && ['read', 'write', 'exec', 'exec-destructive'].includes(s.category)) return { path: 'D-1', finalS: -1, note: '系统信息泄露/完整性受损' };
   if (s.hasOpaqueVar) return { path: 'D-1', finalS: -1, note: '执行内容含未知变量引用，值不可审计（无法证明无风险）' };
   return { path: 'D-1', finalS: 0 };

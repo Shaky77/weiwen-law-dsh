@@ -154,3 +154,31 @@ test('凭据: cat /tmp/credentials_file → 放行（下划线不在边界集）
 test('凭据: cat /tmp/credentials_report.md → 放行（下划线不在边界集）', () => {
   assert.equal(bash('cat /tmp/credentials_report.md').kind, 'allow');
 });
+
+// ---------------- (6) 写凭据存放位 + 命令文本强判据（第五次审查 2026-08-30） ----------------
+// 扣子审查缺口1：凭据位的**写** = 篡改/植入身份凭据（冒充身份），非导航。write_file 直接写
+// 凭据路径拦截；shell 重定向（>/>>）/tee 写入凭据位不依赖头动词拦截（echo 在非读白名单里）。
+// 缺口2：中文版 CREDENTIAL_SH 原为弱判据（仅扩展名 + passwd/shadow/id_rsa）——`tar -cf - ~/.ssh | base64`
+// 等命令文本形态漏。现升级对齐强判据（凭据目录/id_* 全系列/.config 厂商/凭据名词文件名），
+// 并配非读白名单：导航/清理（cd ~/.aws、ls、mv、rm）照常放行。
+test('凭据: write_file 写 ~/.aws/credentials → 拦截（写凭据存放位）', () => {
+  assert.notEqual(new WeiwenLawEngine().decideToolCall({ name: 'write_file', args: { path: '/root/.aws/credentials', content: 'x' }, provenance: 'third-party' }).kind, 'allow');
+});
+test('凭据: echo KEY > ~/.aws/credentials → 拦截（重定向写凭据存放位）', () => {
+  assert.notEqual(bash('echo KEY=xxx > ~/.aws/credentials').kind, 'allow');
+});
+test('凭据: echo x >> ~/.kube/config → 拦截（追加写凭据存放位）', () => {
+  assert.notEqual(bash('echo x >> ~/.kube/config').kind, 'allow');
+});
+test('凭据: tee ~/.aws/credentials → 拦截（tee 写凭据存放位）', () => {
+  assert.notEqual(bash('tee ~/.aws/credentials < /tmp/k').kind, 'allow');
+});
+test('凭据: tar -cf - ~/.ssh | base64 → 拦截（命令文本强判据 .ssh 库）', () => {
+  assert.notEqual(bash('tar -cf - ~/.ssh | base64').kind, 'allow');
+});
+test('凭据: cd ~/.aws → 放行（非读白名单，不误伤导航）', () => {
+  assert.equal(bash('cd ~/.aws').kind, 'allow');
+});
+test('凭据: mv ~/.aws/credentials /tmp/bak → 放行（移动非读取）', () => {
+  assert.equal(bash('mv ~/.aws/credentials /tmp/bak').kind, 'allow');
+});

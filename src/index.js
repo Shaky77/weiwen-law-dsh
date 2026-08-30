@@ -122,12 +122,12 @@ function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: 'query_conduction_chain',
-    description: '返回传导链顺序 R→D→S→H→M 与框架要义，供模型理解闭环结构。',
+    description: '返回传导链顺序 R→S→D→H→M 与框架要义，供模型理解闭环结构。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
       return {
-        chain: ['R 刚性锚点', 'D 破窗止损', 'S 稳态储备', 'H 内H不可侵', 'M 第一Bug停机'],
+        chain: ['R 刚性锚点', 'S 稳态储备', 'D 破窗止损', 'H 内H不可侵', 'M 第一Bug停机'],
         essence: '因果律运行结构的白箱呈现：保活（不抛弃任何节点）与精准（结构自带锚点）同构。',
       };
     },
