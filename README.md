@@ -1,6 +1,6 @@
-# dsh-weiwen-law-plugin
+# dsh-weiwen-law
 
-> ✅ **Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)** — DeepSeek Harness 精选插件列表
+> 📡 **登记中**：已向 [dsh-plugin-radar（awesome-dsh-plugins）](https://github.com/AdamPlatin123/dsh-plugin-radar) 提交登记 PR [#403](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/403)，待维护者按四档判定流程实测收录（当前运行级：待测）。
 
 **唯稳律通用因果引擎（白箱呈现）** —— 以 **DeepSeek Harness（DSH）** 的 Cordis 插件形态实现。
 
@@ -55,7 +55,7 @@
 
 ```bash
 git clone https://github.com/Shaky77/weiwen-law-dsh
-cd dsh-weiwen-law-plugin
+cd weiwen-law-dsh
 
 # 把 DeepSeek API Key 放到本地安全路径（一行，无换行），或在示例脚本里改读取路径：
 #   examples/demo-tool-loop.mjs 顶部的 KEY_PATH 常量
@@ -145,7 +145,7 @@ weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
 src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义常量（详见基础版仓库，本仓不展开推导）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
-test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 128/128 通过）
+test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 195/195 通过，commit a193a93）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
@@ -225,9 +225,38 @@ dsh --profile web
 - 远程部署 dsh 时需在配置中声明 `trustedHosts`，否则 API 层拒绝非本环路请求。
 - `pnpm` 源码构建 dsh 时**必须**先 `pnpm run build`（内部包链接与前端产物），否则报模块找不到。
 
-## License
+## 配置（Configuration）
+
+- **运行形态**：纯 ESM 插件，无需构建；通过 `weiwen-law.patch.yml` overlay 或 `dsh plugin add` 接入 DSH，无独立服务进程。
+- **环境变量**：仅 `DEEPSEEK_API_KEY`（模型调用需要，由 DSH 模型适配层透传，本插件不读取密钥内容）；其余为 DSH 自身配置（profile / cordis.yml），本插件不定义专属环境变量。
+- **敏感项**：插件不写任何持久状态、不落盘用户数据；凭据默认留在宿主安全路径（如 `~/.workbuddy/deepseek_api_key.txt`），由宿主与 DSH 管理，不在本仓提交。
+
+## 权限与数据（Permissions & data）
+
+- **文件访问**：仅读取插件自身源码与 `weiwen-law.patch.yml`；不读取、不写入用户项目文件、会话日志或其他插件目录。
+- **网络访问**：无独立对外网络请求；模型调用的网络由 DSH 模型适配层负责。
+- **凭据与用户数据**：不采集、不上传任何用户数据或 API Key；内 H 边界声明「本插件不读不写主体性黑箱」——`query_boundary` 工具仅返回边界说明，不返回任何用户内容。
+- **不可变声明**：三大铁律（`law.mjs`）与刚性锚点定义为只读常量，运行时不可被提示词或外部输入改写（白箱不篡改）。
+
+## 故障排查（Troubleshooting）
+
+- **插件未加载 / 工具未出现**：确认 DSH 版本为 v0.1.x，且 `weiwen-law.patch.yml` 已正确 overlay 到目标 profile；`dsh --profile web` 后于「设置 → 插件」确认 `weiwen-law` 状态为「已启用」。
+- **挂载报错 `module not found`**：若从源码构建 dsh，须先 `pnpm run build`（内部包链接与前端产物），否则报模块找不到。
+- **API 层拒绝非本环路请求**：远程部署 dsh 时须在配置声明 `trustedHosts`。
+- **回滚**：移除 `--patch` 引用或 `dsh plugin remove dsh-weiwen-law` 并重启即彻底卸载，插件不残留任何状态。
+
+## 开发（Development）
+
+- **依赖**：Node.js `^22.19 || >=24`；运行时依赖仅 `@deepseek-ai/dsh-tools`（peerDependency，可选）。
+- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **195/195 全绿**（commit `a193a93`）。
+- **构建**：无需构建（纯 ESM + yml overlay）；修改 `src/core/engine.mjs` 后重跑 `npm test` 回归。
+- **贡献**：框架本体（心法层）冻结于基础版仓库，本活系统版承载工程迭代；改动请基于本仓库 PR，并附 `node --test` 实测输出。
+
+## License & security
 
 [AGPL-3.0](./LICENSE)
+
+> **安全漏洞私下报告**：请勿在公开 issue 披露安全问题，直接邮件 563003@qq.com，作者将优先处理。
 
 ---
 
