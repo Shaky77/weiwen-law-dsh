@@ -108,7 +108,7 @@ function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: 'list_rigid_anchors',
-    description: '列出 RDSHM 中 R 刚性锚点的当前生效定义，供模型校准方向、自查是否越界。',
+    description: '列出 RSDHM 中 R 刚性锚点的当前生效定义，供模型校准方向、自查是否越界。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {

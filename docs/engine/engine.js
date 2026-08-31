@@ -12,7 +12,7 @@ import { BugStopGuard } from './bugstop.js';
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
 // 根除"动词藏在 command/name 里就漏判"的盲区（如 read_file 读 .env）。
-// 推演层（deduceRisk）沿 RDSHM 前向模拟后果，兜住判定层给不出确定结论的灰色地带。
+// 推演层（deduceRisk）沿 RSDHM 前向模拟后果，兜住判定层给不出确定结论的灰色地带。
 const TOOL_CATEGORY = {
   read_file: 'read', read_inner_h: 'read', read: 'read', query_inner_h: 'read',
   write_file: 'write', write: 'write', edit: 'write',
@@ -168,7 +168,7 @@ function inferCallSemantics(call, ctx = {}) {
     isAuthSink: /authorized_keys/i.test(path),
   };
 }
-// ---------------- 推演层（手稿 H 分叉-并行-对比）：沿 RDSHM 前向模拟，但 H 处双路并行 ----------------
+// ---------------- 推演层（手稿 H 分叉-并行-对比）：沿 RSDHM 前向模拟，但 H 处双路并行 ----------------
 // 手稿微观链：D(新X)→R₀→S₀⇌(H₀)→D₀→M₀→H₀(内)→H₀(外)，H₀ 处正式分叉：
 //   H₀ → S₀(S₀+1)   ← S 增路径（稳态增量，纯白箱）
 //   H₀ → D₀(D₀+1)   ← D 增路径（=|S-1| 稳态绝对侵蚀）

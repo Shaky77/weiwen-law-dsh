@@ -106,7 +106,7 @@ prior art 里的"因果引擎"几乎全是**领域专用**，恰恰反衬"通用
 1. **确定性白箱因果裁决中间件**：裁决路径零 LLM。judgeai 用"LLM 作解释器"（非确定）；多数同类是 ML/概率式。我们引擎是确定性（已实跑 16 场景零随机）。
 2. **"由构造而法域中性"（content-agnostic by construction）**：只校验因果结构（R 锚定 / M 不自相矛盾 / H 不可侵 / S 单调不降），**从不编码任何法律/领域内容**。同类法律 AI 是 jurisdiction-aware（编码法域、换 norm 包）；我们是 jurisdiction-neutral（根本不编码）→ 这是本质区别。
 3. **用引擎本身（零 LLM）在真实跨国案例上实证法域中性** → 剔除"LLM 法律参数回忆"混淆变量（扣子 Coze 测试的致命残留点）。这是方法论上的新意。
-4. 具体设计：RDSHM 五元链 + 裁决铁律（风险<唯稳律<稳态，严格大于、无=）+ 内H不可侵 + 第一Bug停机。
+4. 具体设计：RSDHM 五元链 + 裁决铁律（风险<唯稳律<稳态，严格大于、无=）+ 内H不可侵 + 第一Bug停机。
 
 ### 建议对外表述（bulletproof 版，替换"唯一"）
 > "The first **deterministic, white-box causal-adjudication middleware** that is jurisdiction-agnostic *by construction* — content-agnostic because it validates only causal structure (R-anchoring, M-consistency, H-non-invasion, S-monotonicity) and never encodes legal/domain content — empirically validated on real multinational cases (US/UK jury & CN judge systems) using the engine itself (zero LLM), eliminating the LLM-recall confound that plagues legal-AI benchmarks."
