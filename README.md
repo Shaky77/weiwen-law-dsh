@@ -1,6 +1,6 @@
 # dsh-weiwen-law
 
-> 📡 **登记中**：已向 [dsh-plugin-radar（awesome-dsh-plugins）](https://github.com/AdamPlatin123/dsh-plugin-radar) 提交登记 PR [#403](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/403)，待维护者按四档判定流程实测收录（当前运行级：待测）。
+> ✅ **已收录**：[dsh-plugin-radar（awesome-dsh-plugins）](https://github.com/AdamPlatin123/dsh-plugin-radar) 登记 PR [#403](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/403) 已于 **2026-08-31** 合并，`PLUGINS.md` 实测在榜（判定档位：**待测**——升「运行级可用」待雷达下次自动扫描刷新数据快照）。
 
 **唯稳律通用因果引擎（白箱呈现）** —— 以 **DeepSeek Harness（DSH）** 的 Cordis 插件形态实现。
 
@@ -10,6 +10,8 @@
 > - "律 / Law" 为框架名后缀，**非**定义第三部分。
 >
 > 框架完整定义与哲学推导见基础版仓库（冻结门面），本仓为工程插件实现，不展开框架推导。
+
+> ⚖️ **双许可**：开源使用 **AGPL-3.0**；商业集成 / 闭源分发 / 预装合作可取得**独立于 AGPL-3.0 约束**的授权 → 563003@qq.com。详见 [License & security](#license--security) 与 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ---
 
@@ -145,7 +147,7 @@ weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
 src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义常量（详见基础版仓库，本仓不展开推导）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
-test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 195/195 通过，commit a193a93）
+test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 195/195 通过，commit fb57a6c）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
@@ -248,13 +250,18 @@ dsh --profile web
 ## 开发（Development）
 
 - **依赖**：Node.js `^22.19 || >=24`；运行时依赖仅 `@deepseek-ai/dsh-tools`（peerDependency，可选）。
-- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **195/195 全绿**（commit `a193a93`）。
+- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **195/195 全绿**（commit `fb57a6c`）。
 - **构建**：无需构建（纯 ESM + yml overlay）；修改 `src/core/engine.mjs` 后重跑 `npm test` 回归。
 - **贡献**：框架本体（心法层）冻结于基础版仓库，本活系统版承载工程迭代；改动请基于本仓库 PR，并附 `node --test` 实测输出。
 
 ## License & security
 
-[AGPL-3.0](./LICENSE)
+本项目采用**双许可**：
+
+- **开源使用**：**AGPL-3.0**（完整文本见 [LICENSE](./LICENSE)）
+- **商业集成 / 闭源分发 / 预装合作**：可取得**独立于 AGPL-3.0 约束**的授权，请联系 563003@qq.com
+
+外部贡献需签署 CLA（用于支持上述双许可分发），见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 > **安全漏洞私下报告**：请勿在公开 issue 披露安全问题，直接邮件 563003@qq.com，作者将优先处理。
 
