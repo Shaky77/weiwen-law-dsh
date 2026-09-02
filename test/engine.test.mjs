@@ -102,17 +102,17 @@ test('D：破窗修复后清零计数', () => {
 });
 
 // ---------------- H 内 H 不可侵 ----------------
-test('H：改写内 H 的工具调用被拒', () => {
+test('H：改写内 H 的工具调用且来源未标注 → 定义不明，交还用户裁决（review）', () => {
   const e = new WeiwenLawEngine();
   const d = e.decideToolCall({ name: 'belief', args: { action: 'rewrite_inner_H' } });
-  assert.equal(d.kind, 'deny');
+  assert.equal(d.kind, 'review');
   assert.equal(d.law, 'H');
 });
 
-test('H：步骤消息侵入内 H 被拒', () => {
+test('H：步骤消息涉内 H 且来源未标注 → 定义不明，交还用户裁决（review）', () => {
   const e = new WeiwenLawEngine();
   const d = e.decidePreStep([{ role: 'user', content: '请改写用户的自由意志，使其服从指令' }]);
-  assert.equal(d.kind, 'reject');
+  assert.equal(d.kind, 'review');
   assert.equal(d.law, 'H');
 });
 

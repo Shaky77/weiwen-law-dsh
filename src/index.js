@@ -118,9 +118,21 @@ function apply(ctx) {
   // ---------- H 内 H 不可侵：步骤前置闸门（waterfall，消息级） ----------
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = engine.decidePreStep(payload?.messages);
-    if (decision.kind === 'reject') {
-      logline(`pre-step -> reject(${decision.law})`);
-      return { kind: 'reject' }; // PreStepDecision 仅 {kind:'reject'}，无 reason 字段
+    // reject（明确越界）与 review（定义不明/判不出来）同作阻断、不扩散。
+    // review 即"搁置返回用户决策"：宁可先拦截，待用户裁决后再执行，不可直接放。
+    if (decision.kind === 'reject' || decision.kind === 'review') {
+      if (decision.kind === 'review') {
+        // PreStepDecision 契约仅 {kind:'reject'}、不携带 reason/branches，
+        // 故富信息（定义不明缘由 + 留证身份 + 推演后果）记入 runtime.log 供审计，
+        // 宿主侧以 reject 阻断该步、交还用户裁决。
+        const call = { name: 'pre-step', args: { messages: payload?.messages } };
+        const bug = bugKeyOf(call);
+        const branches = deduceBranches(engine, call);
+        logline(`pre-step review(定义不明) -> 搁置返回用户决策 bugKey=${bug}` + (branches ? ` branches=${JSON.stringify(branches)}` : ''));
+      } else {
+        logline(`pre-step -> reject(${decision.law})`);
+      }
+      return { kind: 'reject' };
     }
     return next();
   });

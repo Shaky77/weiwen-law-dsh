@@ -785,7 +785,10 @@ export class WeiwenLawEngine {
     // 写盘类工具跳过第三档：缺省来源的写盘 content 是"落盘数据"（AI 自写文档），
     // 与落点判据同哲学——文档引用命令形态是常态，不构成指令（DOC_SINK 防误伤）。
     if (hitsInnerH(s)) {
-      return { reason: '触及内 H 黑箱（思想/自由意志），违反"内 H 不可侵"。' };
+      // 2026-09-02 作者裁定：来源未标注时不可假定"外部侵入"而直接判恶意（deny）。
+      // 内 H 名词命中仅说明内容涉内 H 概念，无法判定内外归属（principal 自我设定 vs 外部注入）。
+      // 故标记"定义不明"，交还用户裁决（搁置返回用户决策），不揣测意图、不判恶意。
+      return { kind: 'review', law: 'H', reason: '来源未标注且内容涉及内 H 相关概念（思想/内心/记忆/价值观/自由意志/…），无法判定内外归属——定义不明，交还用户裁决后再执行。' };
     }
     if (!isDocWrite && looksLikeOperationalDirective(s)) {
       return { kind: 'review', reason: '来源未标注且内容带有操作指令的形式——无法判定内外，交还人工复核。' };
@@ -1175,10 +1178,10 @@ export class WeiwenLawEngine {
       return { kind: 'allow' }; // 外部内容作为数据处理 → 放行
     }
 
-    // 默认（provenance 未知）：静态查词判据，行为不变
+    // 默认（provenance 未知）：静态查词命中内 H 概念 → 标记"定义不明"交还用户裁决（2026-09-02 作者裁定）。
+    // 不累加 failureStreak：未定性为违规即不记创伤（不揣测意图、不判恶意）。
     if (hitsInnerH(flat)) {
-      this.failureStreak += 1;
-      return { kind: 'reject', law: 'H', reason: '消息试图侵入内 H 黑箱（思想/自由意志）。' };
+      return { kind: 'review', law: 'H', reason: '来源未标注且消息涉及内 H 相关概念，无法判定内外归属——定义不明，交还用户裁决。' };
     }
     return { kind: 'allow' };
   }
