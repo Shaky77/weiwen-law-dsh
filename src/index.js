@@ -17,11 +17,40 @@
 import { writeFileSync, appendFileSync } from 'node:fs';
 import { WeiwenLawEngine, DEFAULT_RIGID_ANCHORS } from './core/engine.mjs';
 import { R_DOMAIN, THREE_IRON_LAWS } from './core/law.mjs';
+import { bugKeyOf } from './core/bugstop.mjs';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 
 const LOG = new URL('./runtime.log', import.meta.url);
 function logline(s) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${s}\n`); } catch { /* 日志失败不阻断护栏 */ }
+}
+
+// ---------- review 档六步规格（2026-09-02 定稿，见 docs/review-flow-spec.md）----------
+// 铁律「判不出来就 REVIEW，不猜」的可执行形态：
+//   宁可先拦截，搁置 BUG，标注，返回用户裁决，等待用户裁决后再执行，也不可直接放。
+//   标注 BUG 后需先推演预测后果，一同反馈给用户，提供推演预测后果的参考，而不是什么都不做。
+// 补齐动作全部落在适配层（DSH = 导图的降维层，是钩子载体）；不改判据、不扩词表、不动 src/core/。
+
+// ④ 推演后果补算。deduceRisk 只做语义推断 + 双路模拟，不写任何状态
+//    （不调 recordDeduction / 不动 failureStreak / 不动 sessWritten）⇒ 纯读，可安全补算。
+function deduceBranches(engine, call) {
+  try {
+    const r = engine.deduceRisk(call);
+    return r?.branches ?? null;
+  } catch (e) {
+    logline(`deduceRisk failed: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
+// ⑤ 推演后果的人可读摘要：把两条路各自的终点摆出来，不替人做选择。
+function branchesSummary(br) {
+  if (!br || (!br.bS && !br.bD)) return '';
+  const s = br.bS ? `S+1 路径终态 ${br.bS.finalS > 0 ? '+' : ''}${br.bS.finalS}` : 'S+1 路径：无';
+  const d = br.bD
+    ? `D-1 路径终态 ${br.bD.finalS}${br.bD.note ? `（${br.bD.note}）` : ''}`
+    : 'D-1 路径：无';
+  return `【推演预测·供裁决参考】放行：${s}；越界：${d}`;
 }
 
 const name = 'weiwen-law';
@@ -53,7 +82,11 @@ function apply(ctx) {
       // 阻断该步、不扩散（D 破窗止损 / M 以断保续 / 推演中高风险兜底）
       // review（中风险）在无人工确认环境保守拦截；reason 已标注"建议二次确认"
       // 透传引擎闭环字段与推演风险等级，供调用方读取
-      return {
+      //
+      // 对外语义固定为 deny：宿主契约只认 deny / next()，返回 'review' 有被当未知类型放行的风险。
+      // 「宁可先拦截，不可直接放」⇒ 用宿主听得懂的话说"拦住"，用附加字段说"这是挂起不是终局"。
+      const isReview = decision.kind === 'review';
+      const out = {
         kind: 'deny',
         law: decision.law,
         reason: `[唯稳律·${decision.law}] ${decision.reason}`,
@@ -63,6 +96,21 @@ function apply(ctx) {
         ...(decision.stage !== undefined ? { stage: decision.stage } : {}),
         ...(decision.risk ? { risk: decision.risk } : {}),
       };
+      if (isReview) {
+        // ③ 搁置 + 标注留证：引擎某些 review 出口未挂 bugKey，此处补稳定 BUG 身份供追溯。
+        //    不走 _markIntercept：避免污染 M 档 mBugForce 计数（会改变达封顶升级行为）。
+        if (out.bugKey === undefined) out.bugKey = bugKeyOf(call);
+        // ④⑤ 推演后果一并交还人类（引擎内部已算，出口原本丢弃）
+        const branches = deduceBranches(engine, call);
+        if (branches) out.branches = branches;
+        // ⑥ 待裁决语义显式化（裁决回传通道本身未开，此处仅让调用方可区分"挂起"与"终局拒绝"）
+        out.humanDecision = decision.humanDecision !== false;
+        out.awaitingHuman = true;
+        const summary = branchesSummary(branches);
+        if (summary) out.reason = `${out.reason}\n${summary}`;
+      }
+      logline(`pre-execute ${exec?.name} -> ${decision.kind}${isReview ? '(awaitingHuman, bugKey=' + out.bugKey + ')' : ''}`);
+      return out;
     }
     return next();
   });
