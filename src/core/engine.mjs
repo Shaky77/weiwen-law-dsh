@@ -420,15 +420,30 @@ function extractShell(call) {
   // 不能抽成 shell（否则把"写说明文档"误判成"执行命令"——宏观吞微观）。
   const isWrite = WRITE_TOOLS.has(call?.name);
   const pool = [];
+  // 递归收集（补数组/嵌套形态）：键名是开放集合，命令同样可能藏在 commands:[...] 或 steps.s1 里，
+  // 只扫顶层字符串会被这两种形态绕过。深度上限 4 防深对象拖慢热路径；
+  // 写工具的文档键全程跳过，分形落点判定不变。命令形态的筛子（SHELL_HEAD/SHELL_OP）在后面，此处不判。
+  const collect = (node, depth) => {
+    if (depth > 4 || node == null) return;
+    if (typeof node === 'string') { pool.push(node); return; }
+    if (Array.isArray(node)) { for (const x of node) collect(x, depth + 1); return; }
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        if (isWrite && SKIP_CONTENT_KEYS.has(k)) continue;
+        if (k === 'name' || k === 'tool') continue; // 工具名本身不是命令
+        collect(v, depth + 1);
+      }
+    }
+  };
   const a = call.args ?? {};
   for (const [k, v] of Object.entries(a)) {
     if (isWrite && SKIP_CONTENT_KEYS.has(k)) continue;
-    if (typeof v === 'string') pool.push(v);
+    collect(v, 0);
   }
   for (const k of Object.keys(call)) {
     if (k === 'name' || k === 'args' || k === 'provenance' || k === 'ctx' || k === 'id') continue;
     if (isWrite && SKIP_CONTENT_KEYS.has(k)) continue;
-    if (typeof call[k] === 'string') pool.push(call[k]);
+    collect(call[k], 0);
   }
   const shaped = pool.filter((v) => SHELL_HEAD.test(v) || SHELL_OP.test(v));
   if (shaped.length) return shaped.sort((x, y) => y.length - x.length)[0];
