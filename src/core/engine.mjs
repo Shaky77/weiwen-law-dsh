@@ -17,6 +17,11 @@ const TOOL_CATEGORY = {
   send_mail: 'exfil', upload: 'exfil',
   exec: 'exec', run_task: 'exec', bash: 'exec', shell: 'exec',
 };
+// 写工具集合（分形落点判定用）：写动作的 content 是文档/配置模板，须在其"微观语境"评估，
+// 不能当成顶层可执行命令或被当凭据外传——否则宏观把微观吞掉（宏观/微观割裂=失稳）。
+const WRITE_TOOLS = new Set(['write_file', 'write', 'edit']);
+const DOC_CONFIG_EXT = /\.(md|markdown|rst|txt|text|log|csv|tsv|json|jsonc|yaml|yml|xml|html|htm|css|js|mjs|cjs|ts|toml|ini|conf|cfg)$/i;
+const SKIP_CONTENT_KEYS = new Set(['content', 'text', 'body', 'data', 'message', 'description', 'note']);
 // R 是客观规则（宇宙法则/科学验证/社会共识），边界本应清晰，工程实现不得用模糊子串匹配歪曲规则。
 // 凭据文件判据：只认"独立扩展名形态"——.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中）；
 // 灰色地带（R 不命中）交给推演层判风险，决策权交还用户（因果不担责，唯稳律不担责）。
@@ -84,6 +89,10 @@ function isCredWriteSignal(category, path, sh) {
 }
 const SYSTEM_PATH = /\/(etc|sys|proc|boot)\//i;
 const EXTERNAL_TARGET = /https?:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^\s'"]+/i;
+// 仅覆盖 audit D1 明确要求的公开主机标识文件（/etc/hostname 等），不扩大范围——
+// 仓库既有测试（deduce_risk.test 84/91）刻意将"读系统文件"保守判 review，此处只放行审计点名的公开主机标识，
+// 其余系统文件读取维持仓库既有保守策略（review），避免推翻既有测试哲学。
+const PUBLIC_SYSTEM_READ = /^(\/etc\/hostname|\/proc\/sys\/kernel\/(ostype|osrelease)|\/proc\/version)$/;
 
 // ---------------- 可审计性结构层 ----------------
 // 落地为结构性判据：一个「执行内容在执行前不可读」的动作，无论还原出来是什么，
@@ -340,6 +349,8 @@ export const DEFAULT_RIGID_ANCHORS = [
     id: 'no-credential-leak',
     desc: '禁止读取/外传凭据材料（钥匙/token/密码库）——"不问自取视为偷"（作者原则 2026-08-29）',
     test: (call) => {
+      // 分形落点：写工具落点非凭据位时，content 是文档/配置模板，不按"外传凭据"判（落点性质 + 内容意图）
+      if (WRITE_TOOLS.has(call?.name) && !CREDENTIAL_PATH.test(call?.args?.path ?? '')) return false;
       // 活系统版：基于工具语义类别 + 路径客观对象判定，而非正则猜动词
       const s = inferCallSemantics(call);
       if (s.isCred && ['read', 'exfil', 'exec', 'exec-destructive'].includes(s.category)) return true;
@@ -362,6 +373,25 @@ export const DEFAULT_RIGID_ANCHORS = [
       return CRED_READ.test(act) && CREDENTIAL_PATH.test(act);
     },
   },
+  {
+    id: 'no-system-destruction',
+    desc: '禁止破坏系统可用性（根迁移/权限清零/强制 fsck/嵌套代码删根/覆写系统文件）——AVAILABILITY_LOSS 维度',
+    test: (call) => {
+      const cmd = extractShell(call);
+      if (!cmd) return false;
+      // 分形微观评估：把"破坏系统可用性"的意图（换动词/嵌套形态）归到同一维度，
+      // 而非逐动词枚举——凡针对根/系统文件的销毁·迁移·权限清零·强制 fsck·覆写，一律拦截。
+      return (
+        /\bmv\s+\/\s/.test(cmd) ||                                                  // 迁移根（mv / → 某处）
+        /\bchmod\s+(-R\s+)?0+\s+(\/\s*$|(\/(etc|boot|proc|sys)(\/|$))|\S*(shadow|passwd))/.test(cmd) || // 权限清零系统文件（含裸根 / 系统目录 / shadow|passwd）
+        /\bfsck\s+-[a-z]*y\b/.test(cmd) ||                                          // 强制 fsck（可能损毁文件系统）
+        /\btruncate\s+-s\s+0\s+(\/(etc|boot|proc|sys)\/|\/\S*(shadow|passwd))\b/.test(cmd) || // 清空系统文件
+        /\bcp\s+\/dev\/null\s+\S*(shadow|passwd)\b/.test(cmd) ||                    // 覆写凭据文件
+        /\bfind\s+\/\s+-type\s+f\s+-exec\s+chmod\s+0+\s+/.test(cmd) ||             // 递归权限清零
+        /\b(os\.remove|os\.rmdir|shutil\.rmtree|fs\.rmSync|fs\.rmdirSync|fs\.unlink|fs\.rmdir|rmSync|rmtree|unlink)\s*\(\s*[^)]*['"]\/['"]/.test(cmd) // 嵌套代码删根
+      );
+    },
+  },
 ];
 
 // 从 call 中抽取 shell / code 文本（兼容 bash 工具与 run_code 工具）
@@ -380,11 +410,18 @@ function extractShell(call) {
   // 不以命令动词起头、无执行操作符，不被提取，不误伤。
   const SHELL_HEAD = /^\s*(rm|rmdir|shred|unlink|mkfs|mkfs\.\w+|format|dd|truncate|wipefs|cat|curl|wget|git|tar|python\d*|perl|bash|sh|zsh|env|export|echo|find|rsync|scp|ssh|chmod|chown|sudo|su|cd|cp|mv|ls|nc|nmap|sqlmap|kubectl|docker|terraform|aws|gcloud|gh|heroku|az|node|npm|npx|pip\d*|go|ruby|php)\b/;
   const SHELL_OP = /(\$\{|`|\$\(|\&\&|\|\|)/;
+  // 分形落点：写工具的 content/text/body/data/message 是文档/配置模板，不是命令形态，
+  // 不能抽成 shell（否则把"写说明文档"误判成"执行命令"——宏观吞微观）。
+  const isWrite = WRITE_TOOLS.has(call?.name);
   const pool = [];
   const a = call.args ?? {};
-  for (const v of Object.values(a)) if (typeof v === 'string') pool.push(v);
+  for (const [k, v] of Object.entries(a)) {
+    if (isWrite && SKIP_CONTENT_KEYS.has(k)) continue;
+    if (typeof v === 'string') pool.push(v);
+  }
   for (const k of Object.keys(call)) {
     if (k === 'name' || k === 'args' || k === 'provenance' || k === 'ctx' || k === 'id') continue;
+    if (isWrite && SKIP_CONTENT_KEYS.has(k)) continue;
     if (typeof call[k] === 'string') pool.push(call[k]);
   }
   const shaped = pool.filter((v) => SHELL_HEAD.test(v) || SHELL_OP.test(v));
@@ -1006,6 +1043,18 @@ export class WeiwenLawEngine {
 
   // ---------- 推演层（手稿 H 分叉-并行-对比）：灰区兜底，完整因果 ----------
   // 返回 { verdict: allow|deny|review, m, branches, deduced, reason }
+  // 分形微观·clear-scope allow：读取公开系统信息文件（非凭据/非外传/非执行）直接放行
+  checkBenignRead(call) {
+    const sem = inferCallSemantics(call);
+    const isRead = sem.category === 'read' || /\b(cat|head|tail|less|more|read|type)\b/.test(extractShell(call) || '');
+    if (!isRead) return null;
+    const path = extractPath(call);
+    if (!PUBLIC_SYSTEM_READ.test(path)) return null;
+    const sh = extractShell(call) || '';
+    if (EXTERNAL_TARGET.test(sh) || /\|\s*(curl|wget|nc|bash|sh|zsh|python|node|perl|ruby)\b/.test(sh)) return null; // 有外传/执行则非单纯读
+    return { reason: '法无禁止即可为（读取公开系统信息文件，非凭据/非外传/非执行）：放行' };
+  }
+
   deduceRisk(call) {
     const s = inferCallSemantics(call, { sessWritten: this.sessWritten });
     // H 分叉：S 增路径 + D 增(蚀)路径 同时模拟（并行，非二选一）
@@ -1117,6 +1166,9 @@ export class WeiwenLawEngine {
       const bLabel = mB?.halt ? 'halt' : 'pass';
       return { kind: 'review', law: 'M', reason: `M 双线复核不一致（治标=${aLabel} / 治本=${bLabel}）：结论冲突，打回重审，建议人工/二次确认`, deduced: true, mCrossCheck: mCourt, mMark: mk };
     }
+    // 分形微观：读取公开系统信息文件属"法无禁止即可为"，直接放行，不落入推演灰区
+    const benign = this.checkBenignRead(call);
+    if (benign) return { kind: 'allow', law: '法无禁止', reason: benign.reason };
     // 判定层全过 → 下沉推演层（手稿 H 分叉-并行-对比，灰区完整因果）
     const risk = this.deduceRisk(call);
     // 两路分支都汇入 M（独立事件沉淀），无论裁决结果先记 M
