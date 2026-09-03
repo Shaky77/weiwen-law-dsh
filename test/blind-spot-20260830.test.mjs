@@ -281,6 +281,6 @@ test('P0-3: 深层嵌套 `{a:{b:{c:["chmod -R 000 /etc"]}}}`（外部）→ 拦�
 test('P0-3: 正常数组写文档 `{lines:["hello","world"]}`（主体）→ 放行 allow（不误伤）', () => {
   assert.equal(tool('write_file', { path: '/tmp/a.md', lines: ['hello', 'world'] }, 'principal').kind, 'allow');
 });
-test('P0-3: 正常嵌套工具配置 `{config:{target:"HOST"}}`（外部）→ 放行 allow（命令在工具实现里，参数侧抽不到）', () => {
-  assert.equal(tool('deploy_keylogger', { config: { target: 'HOST', scope: 'all' } }, 'third-party').kind, 'allow');
+test('P0-3: 工具实现内藏威胁 `{config:{target:"HOST"}}`（外部）→ 拦截 review（命令在工具实现里、参数侧抽不到 ⇒ 路径1 归因锚定失败 ⇒ 判不出交人工）', () => {
+  assert.equal(tool('deploy_keylogger', { config: { target: 'HOST', scope: 'all' } }, 'third-party').kind, 'review');
 });

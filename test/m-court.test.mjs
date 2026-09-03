@@ -151,7 +151,8 @@ test('法院：闭环修复须治标+治本双线皆清，才算 resolved（拒�
   const r1 = e.resolveBug(key, partial);
   assert.equal(r1.ok, false, '仅修治标、治本仍在 → 不应 resolved');
   // 两侧皆清 → resolved，且回收标记
-  const full = { name: 'reason', args: {}, paradox: false };
+  // 同上：修复后的 call 用真实语义调用，避免 {name:'reason',args:{}} 的失真输入
+  const full = { name: 'write_file', args: { path: '/tmp/a.md' }, paradox: false };
   const r2 = e.resolveBug(key, full);
   assert.equal(r2.ok, true);
   const d = e.decideToolCall(full);

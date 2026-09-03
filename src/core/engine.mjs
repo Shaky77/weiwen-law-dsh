@@ -6,6 +6,7 @@
 // 第一BUG停止闭环状态机：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
 import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
+import { attributeCall } from './attribution.mjs';  // 路径1 归因（分形子项 m 果，边界见 _decideCore 注释，非整体 M 果）
 
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
@@ -1195,6 +1196,30 @@ export class WeiwenLawEngine {
     // 分形微观：读取公开系统信息文件属"法无禁止即可为"，直接放行，不落入推演灰区
     const benign = this.checkBenignRead(call);
     if (benign) return { kind: 'allow', law: '法无禁止', reason: benign.reason };
+    // —— 路径1 归因锚点（分形子项 m 果，非整体 M 果）——
+    // 边界铁律（用户定·防逻辑打架）：attrib 是「子项内部跑完一轮 RSDHM 的分形微型
+    // m 果（M₁）」——只回答子问题"这动作类别能否锚定"；它 ≠ _decideCore 最终返回的
+    // allow/deny/review（整条 RSDHM 逻辑链落地的整体 M 果）。
+    // 【2026-09-04 盲区闭合】此前 attrib 仅作证据、不翻裁决，是因顾虑会与「闭环修复后
+    // 重入放行」打架。经树视角复盘 + 实测证伪：该冲突并不存在——闭环 verify 验的是
+    // M 枝⑥「第一 Bug 停机」这一条线，**不覆盖 R 枝**；一根枝清了 ≠ 另一根枝清了，
+    // 故重入时 R 枝照审**不是重复审判，而是补审一个此前无人审过的维度**。
+    // 实测：真实调用（带真名真参数）R 枝可归 ⇒ 不翻；只有「名中性 + 无可观测行为」
+    // 才归不出 ⇒ 按铁律「判不出来就 review，不猜」交还人工。
+    // 例：deploy_keylogger{config:{target:HOST}} 威胁藏在工具实现里、参数侧抽不到，
+    // 此前 allow 放行（盲区），现已收口为 review。
+    const attrib = attributeCall(call);
+    if (!attrib.ok) {
+      // 分形子项 m 果 = 归不出：动作类别不可判 → 铁律「判不出来就 review，不猜」。
+      // 挂 attrib + fractalSubM:true 标注此为「分形子项级」触发，非整体推演结论。
+      return {
+        kind: 'review',
+        law: 'R',
+        reason: `路径1 归因锚定失败（名=${call?.name ?? ''} 中性或无可观测行为）：动作类别不可判，交还人工，不猜`,
+        attrib,
+        fractalSubM: true,
+      };
+    }
     // 判定层全过 → 下沉推演层（手稿 H 分叉-并行-对比，灰区完整因果）
     const risk = this.deduceRisk(call);
     // 两路分支都汇入 M（独立事件沉淀），无论裁决结果先记 M
@@ -1206,7 +1231,7 @@ export class WeiwenLawEngine {
         return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（不合规拦截累计），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
-      return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', deduced: true, mMark: mk };
+      return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', attrib, deduced: true, mMark: mk };
     }
     if (risk.verdict === 'review') {
       // 中风险：灰区推演预测（flow2：灰色地带-标记-推演预测）→ 标记后保守拦截
@@ -1216,12 +1241,12 @@ export class WeiwenLawEngine {
         return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（灰区反复），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
-      return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', deduced: true, mMark: mk };
+      return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', attrib, deduced: true, mMark: mk };
     }
     // 低风险：放行，记录稳态正向增量（S 只增不减）。登记本会话写盘（链式兜底）。
     this._registerWrite(call);
     this.recordSteady({ positive: 1 });
-    return { kind: 'allow', risk: 'low', deduced: true };
+    return { kind: 'allow', risk: 'low', attrib, deduced: true };
   }
 
   // 本会话写盘登记（链式状态兜底）：write 放行时记录 path→content，

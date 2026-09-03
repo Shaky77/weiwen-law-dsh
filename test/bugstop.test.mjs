@@ -41,7 +41,11 @@ test('闭环：完成 反推→溯源→修复(验证) 后，重入放行', () =
 
   e.reverseBug(key);                         // 逻辑反推（溯）
   e.traceBug(key, 'R 客观规则层：前提失真');  // 溯源标记
-  const fixed = { name: 'reason', args: {}, paradox: false }; // 修复：去除悖论标志
+  // 修复：去除悖论标志。修复后的 call 须为**真实语义调用**（带真名真参数）——
+  // 若用 {name:'reason',args:{}} 这类空调用属失真输入：路径1 归因必然判定
+  // 「名中性 + 无可观测行为」，按铁律落 review，测不出「闭环闸门放行」这一意图。
+  // （2026-09-04 树视角复盘：闭环 verify 只验 M 枝⑥，不覆盖 R 枝，故重入时 R 枝照审。）
+  const fixed = { name: 'write_file', args: { path: '/tmp/a.md' }, paradox: false };
   const res = e.resolveBug(key, fixed);      // 默认验证：fixed 不再触发第一BUG停机
   assert.equal(res.ok, true);
 
