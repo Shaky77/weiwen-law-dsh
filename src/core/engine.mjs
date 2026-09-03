@@ -22,6 +22,12 @@ const TOOL_CATEGORY = {
 const WRITE_TOOLS = new Set(['write_file', 'write', 'edit']);
 const DOC_CONFIG_EXT = /\.(md|markdown|rst|txt|text|log|csv|tsv|json|jsonc|yaml|yml|xml|html|htm|css|js|mjs|cjs|ts|toml|ini|conf|cfg)$/i;
 const SKIP_CONTENT_KEYS = new Set(['content', 'text', 'body', 'data', 'message', 'description', 'note']);
+const ZERO_WIDTH = /[\u200B\u200C\u200D\uFEFF\u2060\u00AD]/g; // ZWSP/ZWNJ/ZWJ/BOM(ZWNBSP)/WORD-JOINER/软连字符
+// 零宽字符归一（P2-2 · 2026-09-03）：去零宽 + 拆词还原，使 `ignore<U+200B>all` 还原为 `ignore all`，
+// 结构判据不再被不可见字符劈开。仅作用于内 H 文本判据（checkInnerH 的 s），不波及凭据/路径等客观对象判据。
+function stripZeroWidth(s) {
+  return typeof s === 'string' ? s.replace(ZERO_WIDTH, '') : s;
+}
 // R 是客观规则（宇宙法则/科学验证/社会共识），边界本应清晰，工程实现不得用模糊子串匹配歪曲规则。
 // 凭据文件判据：只认"独立扩展名形态"——.key 后跟字母数字即非凭据（.keyfile/.keyboard 不命中）；
 // 灰色地带（R 不命中）交给推演层判风险，决策权交还用户（因果不担责，唯稳律不担责）。
@@ -768,7 +774,7 @@ export class WeiwenLawEngine {
 
   // ---------- H 内 H 不可侵：任何读/写主体性黑箱的操作均拒绝；向外 H 审计放行 ----------
   checkInnerH(call) {
-    const s = JSON.stringify(call ?? '');
+    const s = stripZeroWidth(JSON.stringify(call ?? ''));
     if (isOuterHAudit(s)) return null; // 向外 H 审计行为：白箱可观测，放行（H 双重身份 · outer.auditable）
     // 写盘类工具（write_file/edit/write）：content 是"落盘数据"不是"执行指令"——
     // 与推演层落点判据同哲学：文本会不会被执行取决于落点，写普通文件无执行落点，
