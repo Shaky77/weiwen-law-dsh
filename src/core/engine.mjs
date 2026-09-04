@@ -315,6 +315,9 @@ const DESTRUCTIVE = /\b(rm|rmdir|shred|unlink|mkfs|mkfs\.\w+|format|dd|truncate|
 const SCOPE_ROOT = /((^|[\s=:'"(])\/(\*|\[|\.)|\/(\s|$|[;&|<>]|['")])|(^|[\s=:'"(])~\s*$|\/dev\/(sd[a-z]+\d*|nvme\d+n\d+p?\d*)(\s|$|[;&|<>]|['")]))/;
 const SYS_DELETE = /(^|[\s=:'"(])\/(etc|var|usr|bin|sbin|lib|lib64|boot|root|home|opt|srv|mnt|media|dev|proc|sys|run)(\s|$)/;
 const PSEUDO_FS = /(^|[\s=:'"(])\/(dev|proc|sys|run)\/[^\s]+(\s|$)/;
+// 结构化通道②的「动作类别」分量：取自归因产出的语义层（非工具名、非命令文本）。
+// 语义层是结构产物，非枚举具体工具名；删除类只有 file/cred 两种语义归属。
+const DELETION_LAYERS = new Set(['file-delete', 'cred-delete']);
 const TMP_TOP = /(^|[\s;|&(])(rm|rmdir|shred|unlink|truncate)(\s+-[\w-]+)*\s+\/tmp(\s|$)/;
 const SCOPE_UNKNOWN = /(\$\{?[A-Za-z_]\w*\}?|\$\(|`)/;
 const COMBO_FIND_ROOT_DELETE = /\bfind\s+\/(\s+|$)[^\n]*(-delete|-exec\s+\S*rm\b)/;
@@ -335,16 +338,29 @@ export const DEFAULT_RIGID_ANCHORS = [
     id: 'no-destructive-fs',
     desc: '禁止破坏性文件系统操作（根/全量删除、格式化、系统目录与伪文件系统删除）',
     test: (call) => {
+      // 通道①：命令文本（原有单轴判定，保持不动）
       const cmd = extractShell(call);
-      if (!cmd) return false;
-      return (
-        (DESTRUCTIVE.test(cmd) && (SCOPE_ROOT.test(cmd) || SYS_DELETE.test(cmd) || PSEUDO_FS.test(cmd))) ||
-        COMBO_FIND_ROOT_DELETE.test(cmd) ||
-        RSYNC_WIPE.test(cmd) ||
-        FORK_BOMB.test(cmd) ||
-        SYSRQ_TRIGGER.test(cmd) ||
-        DISK_OVERWRITE.test(cmd)
-      );
+      if (cmd) {
+        const byCmd = (
+          (DESTRUCTIVE.test(cmd) && (SCOPE_ROOT.test(cmd) || SYS_DELETE.test(cmd) || PSEUDO_FS.test(cmd))) ||
+          COMBO_FIND_ROOT_DELETE.test(cmd) ||
+          RSYNC_WIPE.test(cmd) ||
+          FORK_BOMB.test(cmd) ||
+          SYSRQ_TRIGGER.test(cmd) ||
+          DISK_OVERWRITE.test(cmd)
+        );
+        if (byCmd) return true;
+      }
+      // 通道②：结构化调用（路径1 归因 × 路径作用域，双源分置）—— 补单轴塌陷
+      //   分量① 动作类别：取自归因产出（不依赖命令文本、不依赖工具名），与通道① 独立源
+      //   分量② 作用域：取自 path 类参数（不经 extractShell），与分量① 独立源
+      //   两源任一失效，不导致另一源归零；语义同源于「对文件系统的破坏」，非两属性取反（非抵消）
+      const attrib = attributeCall(call);
+      if (attrib.ok && DELETION_LAYERS.has(attrib.layer)) {
+        const p = extractPath(call);
+        if (p && (SCOPE_ROOT.test(p) || SYS_DELETE.test(p) || PSEUDO_FS.test(p))) return true;
+      }
+      return false;
     },
   },
   {
