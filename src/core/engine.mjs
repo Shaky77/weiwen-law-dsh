@@ -6,7 +6,7 @@
 // 第一BUG停止闭环状态机：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
 import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
-import { attributeCall } from './attribution.mjs';  // 路径1 归因（分形子项 m 果，边界见 _decideCore 注释，非整体 M 果）
+import { attributeCall, DELETION_LAYERS } from './attribution.mjs';  // 路径1 归因 + 其产出的删除类语义层集合（词汇归 attribution 所有，引擎仅消费）
 
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
@@ -317,7 +317,6 @@ const SYS_DELETE = /(^|[\s=:'"(])\/(etc|var|usr|bin|sbin|lib|lib64|boot|root|hom
 const PSEUDO_FS = /(^|[\s=:'"(])\/(dev|proc|sys|run)\/[^\s]+(\s|$)/;
 // 结构化通道②的「动作类别」分量：取自归因产出的语义层（非工具名、非命令文本）。
 // 语义层是结构产物，非枚举具体工具名；删除类只有 file/cred 两种语义归属。
-const DELETION_LAYERS = new Set(['file-delete', 'cred-delete']);
 const TMP_TOP = /(^|[\s;|&(])(rm|rmdir|shred|unlink|truncate)(\s+-[\w-]+)*\s+\/tmp(\s|$)/;
 const SCOPE_UNKNOWN = /(\$\{?[A-Za-z_]\w*\}?|\$\(|`)/;
 const COMBO_FIND_ROOT_DELETE = /\bfind\s+\/(\s+|$)[^\n]*(-delete|-exec\s+\S*rm\b)/;
