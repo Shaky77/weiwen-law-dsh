@@ -1,10 +1,10 @@
-// 徐远东镜子的实证探针（只读，不修改引擎）
-// 镜子面：徐的 CATE 框架在「无反事实标签 / 隐藏混杂 / 依据不足」时仍硬输出一个数
+// 实证对照探针（只读，不修改引擎）
+// 镜子面：某 CATE 框架在「无反事实标签 / 隐藏混杂 / 依据不足」时仍硬输出一个数
 //         （假设指标可干净算出），没有「判不出→交人」第三档。
 // 实测：把同结构的「依据不足 / 不可判」调用喂给 DSH，看它是否 review 而非 allow。
 import { WeiwenLawEngine } from './src/core/engine.mjs';
 
-function probe(label, call, xuNote) {
+function probe(label, call, frameNote) {
   const e = new WeiwenLawEngine(); // 每个场景独立实例，避免状态污染
   const d = e.decideToolCall(call);
   const tag = d.kind.toUpperCase().padEnd(7);
@@ -12,10 +12,10 @@ function probe(label, call, xuNote) {
   console.log(`\n${label}`);
   console.log(`  DSH => ${tag} ${law}`);
   console.log(`        ${(d.reason || '').slice(0, 150)}`);
-  console.log(`  徐框架 => ${xuNote}`);
+  console.log(`  对照框架 => ${frameNote}`);
 }
 
-console.log('═══ 徐远东镜子 · DSH 实测 ═══');
+console.log('═══ 对照探针 · DSH 实测 ═══');
 console.log('（每个场景独立引擎实例，避免状态污染）\n');
 
 // —— review 档：DSH 在「判不出」时交人，徐此时硬算 ——

@@ -1,4 +1,4 @@
-// 徐远东 S/D 量化精华融合传感器（适配层，禁区外）
+// S/D 量化效应融合传感器（适配层，禁区外）
 //
 // 【取其精华 · 保留】
 //   1. Cross-fitting DML 伪结果 ψ —— 动作对系统稳态 S / 止损 D 的因果效应估计（最稳路径）。
@@ -9,7 +9,7 @@
 //   2. Replay Simulator 子集有偏 → 不采纳。
 //   3. 估计器当裁决权威 → 引擎始终是最终裁决者，传感器只附信号、绝不覆盖 allow/deny/review。
 //
-// 纪律（用户 2026-09-09 定）：徐函数可达集={S,D}（量化赋值），不可达集={R,H,M}。
+// 纪律：本传感器可达集={S,D}（量化赋值），不可达集={R,H,M}。
 //   本模块只在 S/D 做叶子层「加叶」，不碰 R/H/M，不修改 engine.mjs。
 //   真实训练权重归闭源量化引擎；此处是结构化方法接线（接线即精华，权重非此处）。
 
@@ -58,7 +58,7 @@ export function fusedDecide(call, context = {}) {
         ...base,
         kind: 'review',
         law: base.law ?? 'M',
-        reason: `徐-SD 传感器：${est.reason} → 效应不可识别，交 M review（弃盲目 unconfoundedness）`,
+        reason: `SD 传感器：${est.reason} → 效应不可识别，交 M review（弃盲目 unconfoundedness）`,
         sdUncertain: true,
       };
     }

@@ -231,5 +231,5 @@ function apply(ctx) {
 
 export { name, inject, apply };
 
-// 适配层融合接线：徐远东 S/D 量化精华（M 闸门约束），详见 src/adapt/xu-sd-sensor.mjs
-export { estimateEffectPsi, upliftRank, fusedDecide } from './adapt/xu-sd-sensor.mjs';
+// 适配层融合接线：S/D 量化效应传感器（M 闸门约束），详见 src/adapt/sd-effect-sensor.mjs
+export { estimateEffectPsi, upliftRank, fusedDecide } from './adapt/sd-effect-sensor.mjs';

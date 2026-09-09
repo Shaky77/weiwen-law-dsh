@@ -1,9 +1,9 @@
-// 融合测试：徐远东 S/D 精华接进 DSH 适配层后，引擎裁决不被污染、M 闸门生效。
-// 调用形态严格沿用 probe-xu-mirror.mjs 的 P1–P6，保证「融合后」与「融合前」同基准。
+// 融合测试：S/D 量化效应传感器接进 DSH 适配层后，引擎裁决不被污染、M 闸门生效。
+// 调用形态严格沿用 probe-sd-mirror.mjs 的 P1–P6，保证「融合后」与「融合前」同基准。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WeiwenLawEngine } from '../src/core/engine.mjs';
-import { estimateEffectPsi, upliftRank, fusedDecide } from '../src/adapt/xu-sd-sensor.mjs';
+import { estimateEffectPsi, upliftRank, fusedDecide } from '../src/adapt/sd-effect-sensor.mjs';
 
 function freshEngine() {
   return new WeiwenLawEngine();
