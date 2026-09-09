@@ -79,3 +79,43 @@ test('融合·P1 rm -rf . 仍漏放（融合不掩盖已知细枝盲区，待核
   // 暴露的是 engine.mjs SCOPE_REL_FULL 正则盲区（禁区，须另授权修）。融合层如实暴露，不粉饰。
   assert.equal(r.kind, 'allow');
 });
+
+// ── 杠1 回归锁：缺省 fail-open → fail-closed（扣子 2026-09-09 拦）──
+test('杠1·overlap 未传 → 缺省 fail-closed：写操作交 M review（非静默 ALLOW）', () => {
+  const call = { name: 'fs_write', args: { path: '/tmp/q3_report.txt', content: 'x' } };
+  const r = fusedDecide(call, { engine: freshEngine() }); // 不传 overlap / sRelevant
+  assert.equal(r.kind, 'review');
+  assert.equal(r.sdUncertain, true);
+});
+
+test('杠1·sRelevant 未传 → 保守推导：读类=false(维持放行) / 中性名=true(升级 review)', () => {
+  const readCall = { name: 'read_file', args: { path: '/tmp/ok.txt' } };
+  const readR = fusedDecide(readCall, { engine: freshEngine(), overlap: 0.01 }); // 不可识别, 读类推导 false
+  assert.equal(readR.kind, 'allow');
+  assert.equal(readR.sdUncertain, true);
+  const neutralCall = { name: 'tool_42', args: {} };
+  const neutralR = fusedDecide(neutralCall, { engine: freshEngine(), overlap: 0.01 }); // 不可识别, 中性名推导 true
+  // 注：中性名由引擎本身判 review（M 已介入、提前返回），传感器不重复添 sdUncertain；
+  // 推导为「涉 S」的加严语义在测试「杠1·overlap 未传」(fs_write) 已正面验证。
+  assert.equal(neutralR.kind, 'review');
+});
+
+// ── 杠2 回归锁：psi 无源不输出伪零（扣子 2026-09-09 拦）──
+test('杠2·psi 无源 → 不输出伪零，显式 psiMissing', () => {
+  const call = { name: 'read_file', args: { path: '/tmp/ok.txt' } };
+  const r = fusedDecide(call, { engine: freshEngine(), overlap: 0.6 }); // 可识别但无 psi
+  assert.equal(r.kind, 'allow');
+  assert.ok(r.sdSignal);
+  assert.equal(r.sdSignal.psi, undefined);
+  assert.equal(r.sdSignal.psiMissing, true);
+});
+
+// ── 杠3 回归锁：单向升级闸门语义（禁止 review/deny→allow）（扣子 2026-09-09 拦措辞）──
+test('杠3·单向加严：引擎 review / deny 不被传感器翻成 allow', () => {
+  const reviewCall = { name: 'estimate_causal_effect', args: { treatment: 'X', outcome: 'Y', data: 'observational' } };
+  const r1 = fusedDecide(reviewCall, { engine: freshEngine(), psi: 0.8, overlap: 0.5, sRelevant: true });
+  assert.equal(r1.kind, 'review'); // 仍 review，未被覆盖
+  const denyCall = { name: 'exec', args: { command: 'rm -rf /' } };
+  const r2 = fusedDecide(denyCall, { engine: freshEngine(), psi: 0.9, overlap: 0.5, sRelevant: true });
+  assert.equal(r2.kind, 'deny'); // 仍 deny，未被覆盖
+});
