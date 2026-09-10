@@ -6,7 +6,8 @@
 // 第一BUG停止闭环状态机：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
 import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
-import { attributeCall, DELETION_LAYERS } from './attribution.mjs';  // 路径1 归因 + 其产出的删除类语义层集合（词汇归 attribution 所有，引擎仅消费）
+import { attributeCall, DELETION_LAYERS, GIT_DESTRUCTIVE } from './attribution.mjs';  // 路径1 归因 + 其产出的删除/破坏类语义层集合（词汇归 attribution 所有，引擎仅消费）
+import { R_DOMAIN, FRACTAL_PROPERTY } from './law.mjs';  // R 域刚性锚点常量 + 分形属性常量：destructive 检测须体现 R_DOMAIN 边界法则；跨调用组合须接 FRACTAL_PROPERTY 分形横向递归（接线，非加层）
 
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
@@ -223,6 +224,10 @@ function inferCallSemantics(call, ctx = {}) {
   // 执行落点判据：不止显式解释器形态（bash -c/管道/eval），
   // 执行类工具本身（run_task/exec/bash 等 TOOL_CATEGORY=exec）就是执行落点——task/payload 里的未知变量同样不可审计。
   const isExecTool = TOOL_CATEGORY[call?.name] === 'exec' || TOOL_CATEGORY[call?.name] === 'exec-destructive';
+  const isCredWrite = isCredWriteSignal(category, path, sh);
+  const isExternal = EXTERNAL_TARGET.test(sh) || (isExecOrExfil && EXTERNAL_TARGET.test(packed));
+  // sink 暴露：将内容外传至外部目标 / 写凭据存放位 / 外传类语义（跨调用组合的右端）
+  const isSinkExposure = isExternal || isCredWrite || category === 'exfil' || category === 'exfil-net';
   return {
     category,
     path,
@@ -231,9 +236,9 @@ function inferCallSemantics(call, ctx = {}) {
     // 头动词为非读动作时不构成读泄露（mv ~/.aws/credentials /tmp/bak 是移动非读取）；
     // write_file 的 args.path 属写类工具，由 isCredWrite 判写方向，不受此过滤影响（sh 为空）。
     isCred: (CREDENTIAL_PATH.test(path) && !credNonReadHead(sh)) || (CREDENTIAL_SH.test(sh) && !credNonReadHead(sh)) || hasEnvSecretRef(sh) || hasEnvSecretRef(packed),
-    isCredWrite: isCredWriteSignal(category, path, sh),
+    isCredWrite,
     isSystem: SYSTEM_PATH.test(path) || SYSTEM_PATH.test(sh),
-    isExternal: EXTERNAL_TARGET.test(sh) || (isExecOrExfil && EXTERNAL_TARGET.test(packed)),
+    isExternal,
     hitsInnerH: hitsInnerH(packed),
     // 方向信号（非内容信号）：执行内容在执行前是否可审计。
     // 三段结构齐备才成立（不透明源 → 转换/求值 → 执行落点），避免把"写文档"误判为执行。
@@ -243,6 +248,9 @@ function inferCallSemantics(call, ctx = {}) {
     // 引用本会话写入的文件 → 内容由本会话产生，需复核（跨 call 状态，链式兜底）
     refsSessionWritten: sessionHits.length > 0,
     sessContentDanger,
+    // 跨调用组合（FRACTAL_PROPERTY 分形横向递归·同 R 域同构包含源与汇）：本会话先前读取的敏感源
+    // 与当前暴露 sink 的动作落于同一 R 域（sessRead 与当前 sink 同构包含）→ 组合效应需复核（保守）
+    refsSessionSensitiveRead: isSinkExposure && (ctx?.sessRead?.size > 0),
     // SSH 信任注入通道：写 authorized_keys 属高信任动作，至少保守
     isAuthSink: /authorized_keys/i.test(path),
   };
@@ -260,12 +268,12 @@ function simulateBranch(s, kind) {
     //   白箱不能对"执行前不可读"之物给稳态 credit，故不可审计时 S+1 直接不成立，
     //   逻辑是"无法证明稳态所以不予 +1"，不是"没查出问题所以放行"。
     // 可审计性扩展（2026-08-25）：不止形态（isOpaqueExec），未知变量引用/本会话写盘引用同样不可审计。
-    const opaque = s.isOpaqueExec || s.hasOpaqueVar || s.refsSessionWritten;
+    const opaque = s.isOpaqueExec || s.hasOpaqueVar || s.refsSessionWritten || s.refsSessionSensitiveRead;
     const auditable = !opaque;
     const purelyBenign = auditable && !s.isCred && !s.isSystem && !s.isExternal && !s.hitsInnerH && !s.isAuthSink;
     return {
       path: 'S+1', finalS: purelyBenign ? +1 : 0,
-      ...(auditable ? {} : { note: '执行内容不可审计（不透明源/未知变量/引用本会话写入文件）→ 无法证明稳态增量，S+1 不成立' }),
+      ...(auditable ? {} : { note: '执行内容不可审计（不透明源/未知变量/引用本会话写入文件/跨调用敏感源→汇组合）→ 无法证明稳态增量，S+1 不成立' }),
     };
   }
   // D-1 路径（=|S-1|）：假定 call 触发损伤。侵蚀量按风险信号严重度分级（客观结构，非枚举具体值）。
@@ -282,6 +290,9 @@ function simulateBranch(s, kind) {
   const dangerousCat = ['read', 'exfil', 'exfil-net', 'exec', 'exec-destructive'].includes(s.category);
   if (s.isCred && dangerousCat) return { path: 'D-1', finalS: -3, note: '凭据暴露' };
   if (s.isExternal && ['exfil', 'exfil-net', 'exec'].includes(s.category)) return { path: 'D-1', finalS: -2, note: '向外部外传数据' };
+  // 跨调用组合（FRACTAL_PROPERTY 分形横向递归）：本会话先前读取敏感源（凭据/系统路径），
+  // 当前动作将其暴露至 sink（同 R 域同构包含源与汇）→ 保守 review（不 deny，防误伤）
+  if (s.refsSessionSensitiveRead) return { path: 'D-1', finalS: -2, note: `跨调用组合效应（${FRACTAL_PROPERTY.rule}）：本会话先前读取敏感源，当前动作将其暴露至 sink（同 R 域同构包含源与汇）→ 需人工确认` };
   if (s.isAuthSink) return { path: 'D-1', finalS: -2, note: 'SSH 信任注入（写授权密钥文件），需人工确认' };
   if (s.isCredWrite) return { path: 'D-1', finalS: -2, note: '写凭据存放位（篡改/植入身份凭据），需人工确认' };
   if (s.isSystem && ['read', 'write', 'exec', 'exec-destructive'].includes(s.category)) return { path: 'D-1', finalS: -1, note: '系统信息泄露/完整性受损' };
@@ -335,7 +346,7 @@ const ENV_CRED = /\$(AWS|AZURE|GCP|GOOGLE|GITLAB|NPM|DOCKER|KUBE|OPENAI|ANTHROPI
 export const DEFAULT_RIGID_ANCHORS = [
   {
     id: 'no-destructive-fs',
-    desc: '禁止破坏性文件系统操作（根/全量删除、格式化、系统目录与伪文件系统删除）',
+    desc: '禁止破坏性文件系统操作（根/全量删除、格式化、系统目录与伪文件系统删除），含对被包含工作树（版本库）的全局销毁（git reset --hard / clean -fd / checkout -- 等，依 R 域嵌套包含边界法则自动匹配）。' + R_DOMAIN.invariant,
     test: (call) => {
       // 通道①：命令文本（原有单轴判定，保持不动）
       const cmd = extractShell(call);
@@ -355,10 +366,19 @@ export const DEFAULT_RIGID_ANCHORS = [
       //   分量② 作用域：取自 path 类参数（不经 extractShell），与分量① 独立源
       //   两源任一失效，不导致另一源归零；语义同源于「对文件系统的破坏」，非两属性取反（非抵消）
       const attrib = attributeCall(call);
-      if (attrib.ok && DELETION_LAYERS.has(attrib.layer)) {
-        const p = extractPath(call);
-        if (p && (SCOPE_ROOT.test(p) || SYS_DELETE.test(p) || PSEUDO_FS.test(p))) return true;
+      if (attrib.ok) {
+        if (DELETION_LAYERS.has(attrib.layer)) {
+          const p = extractPath(call);
+          if (p && (SCOPE_ROOT.test(p) || SYS_DELETE.test(p) || PSEUDO_FS.test(p))) return true;
+        }
+        // R 域边界法则（嵌套包含·R_DOMAIN.invariant）：对被包含下层状态（版本库工作树=被包含对象）
+        // 的全局销毁，无显式安全子路径 → 越界。git reset --hard / clean -fd / checkout -- 即此例，
+        // 由 R_DOMAIN 嵌套包含自动匹配，而非塞正则（与通道① 独立源）。
+        if (attrib.layer === 'exec-destructive' && GIT_DESTRUCTIVE.test(attrib.signal)) return true;
       }
+      // git 破坏性亦可经命令文本识别（命名 exec 工具名已归为 exec，语义层抽不到 exec-destructive，
+      // 故补命令文本源；与语义层双源分置，非抵消）。git 无显式安全子路径=整片被包含工作树销毁→越界。
+      if (GIT_DESTRUCTIVE.test(extractShell(call) || '')) return true;
       return false;
     },
   },
@@ -683,6 +703,10 @@ export class WeiwenLawEngine {
     // 本会话写盘登记表：放行的 write 记录 path→content，
     // 后续执行类 call 引用已登记路径时触发复核（refsSessionWritten）。只登记本会话写入，不猜文件系统。
     this.sessWritten = new Map();
+    // 跨调用敏感源读取登记表（FRACTAL_PROPERTY 分形横向递归·同 R 域同构包含源与汇）：
+    // 本会话读取的凭据/系统路径（敏感源）记入此 Set，供后续 sink 暴露调用按分形横向递归
+    // 判定「源→汇」组合效应（保守 review，不 deny，防误伤）。只登记本会话读取，不猜文件系统。
+    this.sessRead = new Set();
     // 内 H 挂号台账（作者协议 · 2026-08-30）
     this.innerHLedger = [];   // append-only：挂号条目只沉淀不消解（与 S 历史刻痕同构）
     this.innerHSeq = 0;
@@ -1098,7 +1122,10 @@ export class WeiwenLawEngine {
   }
 
   deduceRisk(call) {
-    const s = inferCallSemantics(call, { sessWritten: this.sessWritten });
+    const s = inferCallSemantics(call, { sessWritten: this.sessWritten, sessRead: this.sessRead });
+    // 跨调用敏感源登记（FRACTAL_PROPERTY 分形横向递归）：本会话读取的凭据/系统路径（敏感源）
+    // 记入 sessRead，供后续 sink 暴露调用判定「源→汇」组合效应。仅登记 read 类敏感源读取，不猜。
+    if (s.path && (s.isCred || s.isSystem) && s.category === 'read') this.sessRead.add(s.path);
     // H 分叉：S 增路径 + D 增(蚀)路径 同时模拟（并行，非二选一）
     const bS = simulateBranch(s, 'S+1');
     const bD = simulateBranch(s, 'D-1');

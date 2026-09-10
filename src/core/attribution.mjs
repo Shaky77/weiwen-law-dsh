@@ -128,8 +128,13 @@ function extractCommand(call) {
   return { cmd: '', nested: false };
 }
 
+// git 破坏性子命令：作用于被包含工作树（整片被包含对象销毁，无显式安全子路径）
+// —— 依 R 域嵌套包含边界法则自动匹配为越界（与 rm/mkfs 同属 exec-destructive 语义层，长枝·内容语义，不新增 R 域维度）
+export const GIT_DESTRUCTIVE = /\bgit\s+(reset\s+--(hard|\w*[hH]ard)|clean\s+-[fF][dD]?|checkout\s+--\s*(\.\s*$|$)|checkout\s+-[fF]|restore\s+--\w*worktree|restore\s+--staged\s+--worktree)(?=\s|$)/i;
+
 function commandLayer(cmd) {
   if (!cmd) return null;
+  if (GIT_DESTRUCTIVE.test(cmd)) return 'exec-destructive';
   if (/\b(rm|rmdir|shred|unlink|mkfs|format|dd|truncate|wipefs)\b/i.test(cmd)) return 'exec-destructive';
   if (/\b(cat|head|tail|read|less|more|vi|vim|nano|type|open)\b/i.test(cmd)) return 'cred-read';
   if (/\b(curl|wget|scp|rsync|ftp|nc|ssh)\b/i.test(cmd)) return 'network-send';
