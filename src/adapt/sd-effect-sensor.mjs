@@ -16,22 +16,38 @@
 
 import { WeiwenLawEngine } from '../core/engine.mjs';
 
+// 【主干判据 · 类型级可识别性闸门】
+//   只有「number 类型 且 有限」才算可用数值信源；其余一律判信源缺失——不数值化、不猜、不输出伪零。
+//   为什么必须是类型级（而非值级）：
+//     - 值级枚举补不完：Number(null)=Number(false)=Number([])=Number('')=0 全部伪零且 finite；
+//       10n(bigint)→Number()=10 亦被当成正常数值。值的集合开放，列举永远有漏。
+//     - 值级还可能崩：Number(Symbol()) 直接抛 TypeError —— 故必须先 typeof 短路再谈数值化。
+//   顺序即判据：typeof 检查必须在任何 Number() / 比较之前，反过来的每一步都在赌。
+//   （原则本文件 L8 已立「可识别性前置」，此前实现为「取值→数值化→之后才判 missing」，
+//     是原则已立、实现未跟的对齐层缺口；本改补齐，不涉 src/core/* 禁区。）
+const usableNumber = (v) => typeof v === 'number' && Number.isFinite(v);
+
 // overlap ∈ [0,1]：协变量重叠度。落出 [0.05, 0.95] = positivity 违反 → 不可识别。
-// ⚠️ overlap 未传 = 抽取通道失效的一种 → 判不出（fail-closed），绝不当成「可识别」默认值。
+// ⚠️ overlap 非可用数值（未传 / null / 非数字类型 / NaN / ±Infinity）= 抽取通道失效的一种
+//    → 判不出（fail-closed），绝不当成「可识别」默认值。
 export function estimateEffectPsi({ psi, overlap, policyValue }) {
-  if (overlap === undefined || overlap < 0.05 || overlap > 0.95) {
+  if (!usableNumber(overlap) || overlap < 0.05 || overlap > 0.95) {
     const reason = overlap === undefined
       ? 'overlap 未传，抽取通道失效 → 判不出（fail-closed，不附信号）'
-      : `positivity violation: covariate overlap=${overlap} 落出 [0.05,0.95]`;
+      : !usableNumber(overlap)
+        ? `overlap 非有限数值（typeof=${typeof overlap}）→ 信源不可识别，判不出（fail-closed）`
+        : `positivity violation: covariate overlap=${overlap} 落出 [0.05,0.95]`;
     return { identifiable: false, reason };
   }
+  // 让非法状态不可表示：信源缺失时 psi 一律 undefined，绝不输出伪零 0
+  // ——「没有信源」与「信源说效应为零」必须表示不同，否则下游无从分辨，只能靠纪律（而纪律会忘）。
+  const psiUsable = usableNumber(psi);
   return {
     identifiable: true,
-    // 杠2（扣子）：psi 无源（未传）时不输出伪零，显式标 missing，下游不会误读成「效应为零」。
-    psi: psi !== undefined ? Number(psi) : undefined,
-    magnitude: psi !== undefined ? Math.abs(Number(psi)) : undefined,
-    psiMissing: psi === undefined,
-    policyValue: policyValue != null ? Number(policyValue) : undefined,
+    psi: psiUsable ? psi : undefined,
+    magnitude: psiUsable ? Math.abs(psi) : undefined,
+    psiMissing: !psiUsable,
+    policyValue: usableNumber(policyValue) ? policyValue : undefined,
   };
 }
 
@@ -49,10 +65,12 @@ function deriveSRelevant(call) {
 }
 
 // Uplift / Qini 排序：哪些动作更侵蚀 S（按 |ψ| 降序，最蚀 S 在前）
+// 同主干闸门：信源缺失不给伪零 0（0 会被读成「零效应」而排在中间），一律排到末尾且 psi 为 undefined。
 export function upliftRank(actions) {
+  const mag = (a) => (usableNumber(a.psi) ? Math.abs(a.psi) : -Infinity);
   return [...actions]
-    .map((a) => ({ name: a.name, psi: a.psi ?? 0 }))
-    .sort((x, y) => Math.abs(y.psi) - Math.abs(x.psi));
+    .map((a) => ({ name: a.name, psi: usableNumber(a.psi) ? a.psi : undefined }))
+    .sort((x, y) => mag(y) - mag(x));
 }
 
 // 融合裁决：引擎定夺（最终裁决），传感器加 S/D 信号，M 闸门兜底不可识别情形。
