@@ -60,7 +60,7 @@
         "law": "M",
         "sdSignal": null,
         "sdUncertain": true,
-        "reason": "徐-SD 传感器：positivity violation: covariate overlap=0.02 落出 [0.05,0.95] → 效应不可识别，交 M review（弃盲目 unconfoundedness）"
+        "reason": "SD 传感器：positivity violation: covariate overlap=0.02 落出 [0.05,0.95] → 效应不可识别，交 M review（弃盲目 unconfoundedness）"
       },
       "context": {
         "overlap": 0.02,
@@ -123,7 +123,7 @@
         "law": "M",
         "sdSignal": null,
         "sdUncertain": true,
-        "reason": "徐-SD 传感器：positivity violation: covariate overlap=0.02 落出 [0.05,0.95] → 效应不可识别，交 M review（弃盲目 unconfoundedness）"
+        "reason": "SD 传感器：positivity violation: covariate overlap=0.02 落出 [0.05,0.95] → 效应不可识别，交 M review（弃盲目 unconfoundedness）"
       },
       "context": {
         "overlap": 0.02,
@@ -643,5 +643,14 @@
     }
   ],
   "generatedAt": "2026-09-09T03:40:23.127Z",
-  "note": "psi/overlap 为闭源量化引擎占位输入；本探针验证「接线与 M 闸门路由」，非 psi 数值。"
+  "note": "psi/overlap 为闭源量化引擎占位输入；本探针验证「接线与 M 闸门路由」，非 psi 数值。",
+  "desensitization": {
+    "appliedAt": "2026-09-10",
+    "reason": "移除 reason 文案字段中的第三方记号（该来源未同意被引用）；技术果实保留、出处擦除。",
+    "changedScope": "仅 records[*].fused.reason 文案前缀中的第三方姓名记号被移除（2 处）；该前缀为历史模块名残留，无事实含义。",
+    "unchanged": "所有事实字段未改动：probe/round/model/proposed(动作与参数)/engine(kind,law,reason)/fused(kind,law,sdUncertain,sdSignal)/context(overlap,psi,sRelevant)。",
+    "howToVerify": "git show HEAD~1:evidence/fusion-api-probe-report.json 取原件，与本文件逐字段比对：差异应仅为 reason 文案前缀 2 处字符串 + 新增 desensitization 元字段；其余字段（probe/round/model/proposed/engine/fused/context）应完全一致。",
+    "criterion": "§8 证据层/展示层分层：不可改写的是「发生了什么」（事件层），不是「用什么措辞记录」（表述层）。移除记号不改变任何事实要素，故不构成篡改证据。",
+    "selfDiscipline": "本说明不复制该记号原文——脱敏铁律：连「为纠错而引用真名」也不行。"
+  }
 }
