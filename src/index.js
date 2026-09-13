@@ -53,6 +53,44 @@ function branchesSummary(br) {
   return `【推演预测·供裁决参考】放行：${s}；越界：${d}`;
 }
 
+// ⑥ 窗口警察：证据充分性门禁（审计层，零侵入 src/core 判据）
+//   映射：检察院提交证据不足 → 法院发回补充。DSH 这一窗口只认「物证具在」的调用。
+//   物证 = 可被观测的具体作用对象（路径 / URL / 命令中的目标串）；flag（-rf 等）不算。
+//   仅对「有资源操作字段但未外化目标」的调用拦截——无资源字段的（查询 / 自查类）放行，避免误伤。
+//   越界目标（如 rm -rf /）物证仍具在，放行给引擎 R 锚点裁决；本门禁只管「目标缺失」，不抢戏。
+function evidenceOf(args) {
+  if (!args || typeof args !== 'object') return null; // 无资源字段 → 不要求物证
+  const RES = ['command', 'path', 'url'];
+  if (!RES.some((f) => f in args)) return null; // 无资源操作字段 → 无需物证
+  for (const f of RES) {
+    if (!(f in args)) continue;
+    const v = args[f];
+    if (typeof v !== 'string') continue;
+    if (!v.trim()) return false; // 字段存在但空 → 物证缺失
+    if (f === 'command') {
+      // 命令串需解析出具体目标形态（路径 / URL）；纯 `rm -rf` 无参视为未外化
+      const m = v.match(/(?:^|\s)((?:https?:\/\/|\/|\.\/|~|\w:)[^\s]*)/);
+      if (!m) return false;
+    }
+  }
+  return true; // 物证具在
+}
+function policeGate(call) {
+  const ev = evidenceOf(call?.args);
+  if (ev === false) {
+    // 证据不足 → 发回补充：退回调用方（模型）补充具体作用对象后重提，不做实质裁决
+    return {
+      kind: 'deny',
+      law: '证据不足',
+      reason: '【证据不足·发回补充】调用未外化具体作用对象（路径 / URL / 目标）。DSH 不替你猜目标 —— 请补充明确的作用对象后重新提交。',
+      awaitingHuman: true,
+      humanDecision: true,
+      insufficient_evidence: true,
+      bugKey: bugKeyOf(call),
+    };
+  }
+  return null; // 物证具在（或无资源要求）→ 放行给引擎裁决
+}
 const name = 'weiwen-law';
 const inject = ['tools'];
 
@@ -76,6 +114,12 @@ function apply(ctx) {
       contradiction: a.contradiction,
       paramTypeError: a.paramTypeError,
     };
+    // ⑥ 窗口警察：证据不足（物证缺失）的调用直接发回补充，不进引擎实质裁决。
+    const gate = policeGate(call);
+    if (gate) {
+      logline(`pre-execute ${exec?.name} -> police gate (证据不足·发回补充)`);
+      return gate;
+    }
     const decision = engine.decideToolCall(call);
     logline(`pre-execute ${exec?.name} -> ${decision.kind}${decision.law ? '(' + decision.law + ')' : ''}`);
     if (decision.kind === 'deny' || decision.kind === 'review') {
