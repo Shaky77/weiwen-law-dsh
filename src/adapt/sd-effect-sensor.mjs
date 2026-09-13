@@ -98,7 +98,9 @@ export function fusedDecide(call, context = {}) {
       return {
         ...base,
         kind: 'review',
-        law: base.law ?? 'M',
+        // 此处升级的裁决方是 M 闸门（效应不可识别 → 交 M），不是推演层，故 law 恒为 'M'，
+        // 不继承 base.law（2026-09-13：引擎 allow 出口补齐 law 后，继承会把 M 兜底标成推演层结论）。
+        law: 'M',
         reason: `SD 传感器：${est.reason} → 效应不可识别，交 M review（弃盲目 unconfoundedness）`,
         sdUncertain: true,
       };

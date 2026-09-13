@@ -1263,6 +1263,12 @@ export class WeiwenLawEngine {
       };
     }
     // 判定层全过 → 下沉推演层（手稿 H 分叉-并行-对比，灰区完整因果）
+    // 【2026-09-13 出口修复 · 推演链白箱化】
+    // 此前 deduceRisk 算出的两条分支（S 增路径 / D 侵蚀路径）只进 M 台账、不随裁决返回，
+    // 外部只拿到 allow/deny/review 三值 + 一句结论 → 看不见"为什么会是这个结论"，
+    // 完整因果链在 M 出口被截断（表现为：被外部误读为"审计/拦截工具"，且需适配层二次补算兜底）。
+    // 修复方式仅为回显：三处裁决出口一律挂载 projection = risk.branches（不改判据、不改阈值、不改裁决逻辑）。
+    // allow 出口原本连 reason 都未回显，一并按 risk.reason 带出（非新增结论，只是不丢弃已算出的结论）。
     const risk = this.deduceRisk(call);
     // 两路分支都汇入 M（独立事件沉淀），无论裁决结果先记 M
     this.recordDeduction(risk.m);
@@ -1273,7 +1279,7 @@ export class WeiwenLawEngine {
         return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（不合规拦截累计），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
-      return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', attrib, deduced: true, mMark: mk };
+      return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', attrib, deduced: true, mMark: mk, projection: risk.branches };
     }
     if (risk.verdict === 'review') {
       // 中风险：灰区推演预测（flow2：灰色地带-标记-推演预测）→ 标记后保守拦截
@@ -1283,12 +1289,12 @@ export class WeiwenLawEngine {
         return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（灰区反复），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
-      return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', attrib, deduced: true, mMark: mk };
+      return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', attrib, deduced: true, mMark: mk, projection: risk.branches };
     }
     // 低风险：放行，记录稳态正向增量（S 只增不减）。登记本会话写盘（链式兜底）。
     this._registerWrite(call);
     this.recordSteady({ positive: 1 });
-    return { kind: 'allow', risk: 'low', attrib, deduced: true };
+    return { kind: 'allow', law: '推演', reason: risk.reason, risk: 'low', attrib, deduced: true, projection: risk.branches };
   }
 
   // 本会话写盘登记（链式状态兜底）：write 放行时记录 path→content，

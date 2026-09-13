@@ -100,8 +100,10 @@ function apply(ctx) {
         // ③ 搁置 + 标注留证：引擎某些 review 出口未挂 bugKey，此处补稳定 BUG 身份供追溯。
         //    不走 _markIntercept：避免污染 M 档 mBugForce 计数（会改变达封顶升级行为）。
         if (out.bugKey === undefined) out.bugKey = bugKeyOf(call);
-        // ④⑤ 推演后果一并交还人类（引擎内部已算，出口原本丢弃）
-        const branches = deduceBranches(engine, call);
+        // ④⑤ 推演后果一并交还人类。
+        // 2026-09-13：推演分支现由引擎裁决出口直接回显（decision.projection），此处优先读取，
+        // 不再重复调用 deduceRisk 二次推演（补算降级为兜底：R/D/H/M 等早退路径本就没跑推演）。
+        const branches = decision.projection ?? deduceBranches(engine, call);
         if (branches) out.branches = branches;
         // ⑥ 待裁决语义显式化（裁决回传通道本身未开，此处仅让调用方可区分"挂起"与"终局拒绝"）
         out.humanDecision = decision.humanDecision !== false;
