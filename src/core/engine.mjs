@@ -6,7 +6,7 @@
 // 第一BUG停止闭环状态机：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
 import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
-import { attributeCall, DELETION_LAYERS, GIT_DESTRUCTIVE } from './attribution.mjs';  // 路径1 归因 + 其产出的删除/破坏类语义层集合（词汇归 attribution 所有，引擎仅消费）
+import { attributeCall, extractCommand, DELETION_LAYERS, GIT_DESTRUCTIVE } from './attribution.mjs';  // 路径1 归因 + 其产出的删除/破坏类语义层集合（词汇归 attribution 所有，引擎仅消费）
 import { R_DOMAIN, FRACTAL_PROPERTY } from './law.mjs';  // R 域刚性锚点常量 + 分形属性常量：destructive 检测须体现 R_DOMAIN 边界法则；跨调用组合须接 FRACTAL_PROPERTY 分形横向递归（接线，非加层）
 
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
@@ -673,6 +673,33 @@ const INSTR_LABEL = new RegExp(
 // 同因：JSON 键冒号不参与匹配）。→ REVIEW 档，绝不放行。
 const COLON_CFG_OBJECT = new RegExp(String.raw`[^：:\n"']{2,16}[:：][^\n]{0,60}?` + CFG_OBJECT.source);
 
+// 【2026-09-15 铁律8 补强 · 实证驱动】破坏性/删除类动作「目标（物证）未外化」检测。
+// 实证（import WeiwenLawEngine 实跑，见 _verify/verify_police_claim.mjs）：
+//   run_command `rm -rf` 无参 / fs_delete path 空 原返回 allow
+//   （deduceRisk 对空目标算 erosion=0、sOk=true → 双成立 → allow），违反铁律8「判不出就 REVIEW」。
+// 警察视角：物证不具在→证据不足→应 review（移交人）。此函数仅标记「破坏性动作 + 目标缺失」，
+// 不覆盖非破坏性 exec（ls/cp/mv/echo… 仍走推演层，避免误伤）。命中→_decideCore 返回 review。
+function destructiveTargetMissing(call, attrib) {
+  const layer = attrib?.layer;
+  // 删除类结构化工具：直接看 path 参数（空/未外化为物证不具在）
+  if (layer === 'file-delete' || layer === 'cred-delete') {
+    const p = call?.args?.path;
+    return !(typeof p === 'string' && p.trim().length > 0);
+  }
+  // exec / run_command 层：仅当命令含破坏性动词且缺目标才标记（非破坏性命令不触发）
+  if (layer === 'exec' || layer === 'exec-destructive') {
+    const { cmd } = extractCommand(call);
+    if (!cmd) return false;
+    if (!/\b(rm|rmdir|shred|unlink|mkfs|format|dd|truncate|wipefs)\b/i.test(cmd)) return false;
+    const rest = cmd
+      .replace(/^\s*(rm|rmdir|shred|unlink|mkfs[\w.]*|format|dd|truncate|wipefs)\b[^\s\w]*/i, '')
+      .replace(/(?:^|\s)-{1,2}[a-zA-Z]+/g, '')
+      .trim();
+    return rest.length === 0;
+  }
+  return false;
+}
+
 export class WeiwenLawEngine {
   constructor(opts = {}) {
     // 刚性锚点规则：可整体替换，默认套用示例集
@@ -1258,6 +1285,19 @@ export class WeiwenLawEngine {
         kind: 'review',
         law: 'R',
         reason: `路径1 归因锚定失败（名=${call?.name ?? ''} 中性或无可观测行为）：动作类别不可判，交还人工，不猜`,
+        attrib,
+        fractalSubM: true,
+      };
+    }
+    // 【2026-09-15 铁律8 补强 · 接线】破坏性/删除类动作「目标（物证）未外化」→ 证据不足 → review
+    // 接 destructiveTargetMissing（L682）：仅标记「破坏性动作 + 目标缺失」，命中即交还人工。
+    // 此闸门须位于 attrib.ok 之后——attrib 归不出（中性名）已由上方 review 接管，
+    // 此处只接管「类别可判、但缺具体作用对象（物证不具在）」这一类，避免误伤非破坏性 exec。
+    if (destructiveTargetMissing(call, attrib)) {
+      return {
+        kind: 'review',
+        law: 'R',
+        reason: `破坏性动作目标（物证）未外化：${attrib.layer} 层动作缺具体作用对象，证据不足，交还人工，不猜`,
         attrib,
         fractalSubM: true,
       };
