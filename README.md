@@ -134,7 +134,7 @@ export function apply(ctx) {
   // ③ 结果审计钩子：仅观察、不改写
   ctx.on('tools/result', (res) => { if (res?.error) engine.onFailure(); });
 
-  // ④ 5 个白箱自查工具（节选其一，其余同构）
+  // ④ 6 个白箱自查工具（节选其一，其余同构）
   ctx.tools.register(defineTool({
     name: 'query_iron_laws',
     description: '返回三大铁律的定稿文本（不可变）',
@@ -142,7 +142,7 @@ export function apply(ctx) {
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() { return { ironLaws: THREE_IRON_LAWS }; },
   }));
-  // query_steady_state / list_rigid_anchors / query_conduction_chain / query_boundary 同构注册
+  // query_steady_state / list_rigid_anchors / query_conduction_chain / query_boundary / query_bugstop 同构注册
 }
 ```
 

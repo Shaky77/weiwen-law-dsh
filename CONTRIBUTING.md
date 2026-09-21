@@ -25,7 +25,7 @@
 ## 提交前请确认
 
 - [ ] 改动不触及判据层（`src/core/engine.mjs` / `src/core/law.mjs` / `src/core/bugstop.mjs`）；若确需变更判据，请先开 issue 讨论
-- [ ] 测试全绿：跑 `npm test`（即 `node --test "test/*.test.mjs"`），当前基线 **195/195 全绿**
+- [ ] 测试全绿：跑 `npm test`（即 `node --test "test/*.test.mjs"`），当前基线 **264/264 全绿**
 - [ ] 新增场景已补充用例，且不改动、不删除既有测试
 - [ ] 不引入新的运行时依赖（当前运行时依赖仅 `@deepseek-ai/dsh-tools`，peerDependency 且可选）
 
