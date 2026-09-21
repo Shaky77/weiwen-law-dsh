@@ -1384,6 +1384,39 @@ export class WeiwenLawEngine {
     if (loss > 0) this.recordSteady({ negative: Math.abs(loss), trauma: Math.abs(loss) });
   }
 
+  // ---------- 回执侧破窗投影（回执门，2026-09-21） ----------
+  // 「本次失败是否**将**把偏离累积推到达破窗阈值？」——纯读：不写 failureStreak、不置破窗态，
+  //   判据与 checkBreakWindow 同源（单点，不在适配层复制阈值比较）。
+  // 为何取"投影"而非等入账后再读（结构理由，不是补丁）：
+  //   失败入账发生在回执**之后**（tools/result 审计钩子）；而**破窗一旦成立，后续调用在 pre-execute
+  //   即被拒、根本走不到回执** ⇒ 回执侧只有"把累积推达阈值的那一次失败"有机会说话，此后结构上沉默
+  //   （窗口已关）。⇒ 返回的 streak 是**投影值**（当前 + 本次），不是当前值。
+  // 适配层契约：仅在返回值非空时阻断回执；为空即 fail-open 放行。
+  breakAtReceipt() {
+    const cap = this.maxFailureStreak;
+    // 判据与 checkBreakWindow 同源：**窗口在效** ⇔ 偏离累积已达阈值。
+    //   原实现读 `this.windowBroken`，而 CN 引擎**没有这个字段**（本侧无 R 层投影路径，破窗只由
+    //   failureStreak 累积达成）⇒ 该分支恒不成立，于是"已在破窗态"被第二个分支报成
+    //   「即将达阈值（6/5）」：止损其实已经生效，却被描述成尚未发生。改判累积本身。
+    if (this.failureStreak >= cap) {
+      return {
+        broken: true,
+        streak: this.failureStreak + 1,
+        cap,
+        reason: '破窗止损态尚未复位（D）：故障未修好、窗口未结算前不再放行，防扩散。',
+      };
+    }
+    if (this.failureStreak + 1 >= cap) {
+      return {
+        broken: false,
+        streak: this.failureStreak + 1,
+        cap,
+        reason: `连续失败/偏离即将达破窗阈值（${this.failureStreak + 1}/${cap}）：触发 D 破窗止损，防故障扩散杀死整体。`,
+      };
+    }
+    return null;
+  }
+
   // 破窗修复：D 止损后由修复动作清除破窗计数（以断保续 → 横向重启）
   healWindow() {
     this.failureStreak = 0;

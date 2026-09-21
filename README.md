@@ -84,7 +84,7 @@ node examples/demo-tool-loop.mjs
 
 ## 模型怎么调用（给 AI 工程师）
 
-> **白话版**：插件向 DSH 注册 6 个白箱工具，模型像调普通函数一样调用它们来**自查边界**；同时挂了 3 道钩子做**硬性拦截**。
+> **白话版**：插件向 DSH 注册 6 个白箱工具，模型像调普通函数一样调用它们来**自查边界**；同时挂了 3 道硬性闸门（2 道拦动作/步、1 道拦回执）+ 1 个只读审计钩子。
 > **专业版**：节选自 `src/index.js`（完整代码见仓库），见下方代码块。
 
 ### 6 个白箱工具（真实注册名）
@@ -98,11 +98,24 @@ node examples/demo-tool-loop.mjs
 | `query_boundary` | 查内 H 边界（本插件不读不写主体性黑箱） |
 | `query_bugstop` | 查第一 Bug 停机闭环状态：哪些故障环节已停未修复、缺失步骤（反推/溯源/修复），白箱观测闭环是否闭合 |
 
-### 3 道硬闸（hooks）
+### 3 道硬性闸门（hooks）+ 1 个只读审计钩子
 
-- `tools/pre-execute` → 返回 `{ kind: 'deny', reason }` 拦截该动作
-- `agent/pre-step` → 返回 `{ kind: 'reject' }` 拒绝整步
-- `tools/result` → 仅观察、不改写
+- `tools/pre-execute`（waterfall）→ 返回 `{ kind: 'deny', reason }` 拦截该**动作**
+- `agent/pre-step`（waterfall）→ 返回 `{ kind: 'reject' }` 拒绝整**步**
+- `tools/post-execute`（waterfall）→ 返回 `{ kind: 'block', feedback }`，宿主把该调用以 `isError` 返回、content 换成 feedback —— 把失败的**回执**就地断成纠错回执
+- `tools/result`（emit）→ 仅观察、不改写（契约上根本没有返回通道）
+
+四者全部位于模型之外：2 道拦动作/步、1 道拦回执；均不侵入内 H。
+
+### 宿主侧结构入口（模块级 API；模型不可达）
+
+| 入口 | 何时调用 | 为何结构上必须有 |
+|---|---|---|
+| `healBrokenWindow(note)` | 故障**确实修好之后**，或人工裁定后 | 破窗一旦成立，`pre-execute` 拒绝**一切**调用 —— **连同修复动作本身** ⇒ 宿主侧若无复位入口，破窗即**会话级死锁**（唯一出路＝重启进程）。引擎里的 `healWindow()` 只经 `resolveBug()`（闭环验证通过）到达，而它在 DSH 会话里不由被审计的模型触达 ⇒ 缺的是**线**，不是**能力**。 |
+
+它不是工具 ⇒ 模型调不到 ⇒ **结构上不可能自我解锁**（主体分离由位置保证，不靠内容判别）。
+返回 `{ at, note, kind, instances, wereBroken }`：`wereBroken` 为**复位前**实际处于破窗态的实例数
+（先读后治，不虚报"治了"）；每次调用留痕（append-only，上限 20），因为解除止损是责任归因事件。
 
 ### 完整插件入口（节选自 `src/index.js`）
 
@@ -131,10 +144,19 @@ export function apply(ctx) {
     return next();
   });
 
-  // ③ 结果审计钩子：仅观察、不改写
-  ctx.on('tools/result', (res) => { if (res?.error) engine.onFailure(); });
+  // ③ 回执闸门：D 破窗止损落在回执上
+  ctx.on('tools/post-execute', async (exec, result, next) => {
+    if (result?.isError && engine.breakAtReceipt()) {
+      return { kind: 'block', feedback: [{ type: 'text', text: '停机 → 反推 → 溯源 → 修复，方可重入' }] };
+    }
+    return next();
+  });
 
-  // ④ 6 个白箱自查工具（节选其一，其余同构）
+  // ④ 审计钩子（emit）：仅观察、不改写
+  //    契约是 (exec, result) —— 从第一个参数上读 error 会让失败入账静默失效。
+  ctx.on('tools/result', (exec, result) => { if (result?.error) engine.onFailure(); });
+
+  // ⑤ 6 个白箱自查工具（节选其一，其余同构）
   ctx.tools.register(defineTool({
     name: 'query_iron_laws',
     description: '返回三大铁律的定稿文本（不可变）',
@@ -156,21 +178,21 @@ weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
 src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义常量（详见基础版仓库，本仓不展开推导）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
-test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 196/196 通过，commit 8a5af07）
+test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 282/282 全绿）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
 
 ## 部署 / 接入 DeepSeek Harness
 
-本仓库是 DeepSeek Harness（dsh，命令 `dsh`，基于 Cordis 插件框架，MIT）的**外部插件**。唯稳律以"模型之外、执行之内"的因果约束层挂载，不修改 dsh 内核，不绑定具体模型。
+本仓库是 DeepSeek Harness（dsh，命令 `dsh`，基于 Cordis 插件框架，MIT）的**外部插件**。唯稳律以**模型之外**的因果约束层挂载（2 道闸门在动作/步之前、1 道在回执之前），不修改 dsh 内核，不绑定具体模型。
 
 ### 环境要求
 
 - Node.js `^22.19 || >=24`（dsh 硬性要求，奇数版本不支持）
 - DeepSeek API Key（或其他 OpenAI 兼容端点的 Key）
 - dsh 当前为开发者预览版（v0.1.x），官方提示后续存在破坏性 API 变更；生产环境请锁定具体版本
-- **兼容声明**：本插件验证于 DSH v0.1.x（2026-08-27 实测：6 白箱工具注册 + 3 道闸门正常）；mainline 快速演进中，接入前请以官方文档当前版本复核（挂载细节见 DESIGN.md）。
+- **兼容声明**：本插件验证于 DSH v0.1.x —— 真机实测（2026-08-19 与 2026-09-21：6 个白箱工具注册；3 道硬性闸门 + 1 个只读审计钩子端到端工作，回执闸门在一次真实失败调用上实测拦下，并把回执断成纠错回执）；mainline 快速演进中，接入前请以官方文档当前版本复核（挂载细节见 DESIGN.md）。
 
 ### 方式一：npx 快速启动（推荐先体验）
 
@@ -200,7 +222,7 @@ export DEEPSEEK_API_KEY=sk-xxxx     # Linux/macOS
 #    $env:DEEPSEEK_API_KEY="sk-xxxx" # Windows PowerShell
 ```
 
-挂载后，运行在该 profile 的 Agent 自动获得 6 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_bugstop`），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门（R/D/S/H/M 总裁决）与 `agent/pre-step` 内 H 不可侵闸门。
+挂载后，运行在该 profile 的 Agent 自动获得 6 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_bugstop`），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门（R/D/S/H/M 总裁决）与 `agent/pre-step` 内 H 不可侵闸门；工具失败的回执还要过 `tools/post-execute` 回执闸门（D 破窗止损：偏离累积达阈值时把故障回执就地断成纠错回执，断点落在回执上）。
 
 ### 方式三：一行命令安装（官方 dsh plugin 机制，推荐）
 
@@ -217,13 +239,13 @@ dsh plugin --profile web add "github:Shaky77/weiwen-law-dsh"
 dsh --profile web
 ```
 
-装完后在 `设置 → 插件 → 插件列表` 可见 `weiwen-law` 状态为"已启用"；Agent 自动获得 6 个白箱自查工具 + 3 道硬性闸门（`tools/pre-execute` / `agent/pre-step` / `tools/result`）。
+装完后在 `设置 → 插件 → 插件列表` 可见 `weiwen-law` 状态为"已启用"；Agent 自动获得 6 个白箱自查工具 + 3 道硬性闸门（`tools/pre-execute` / `agent/pre-step` / `tools/post-execute`）+ 1 个只读审计钩子（`tools/result`）。
 
 ### 卸载
 
 - **方式三安装的**（官方 plugin 机制）：`dsh plugin --profile web remove dsh-weiwen-law`，重启生效。
 - **方式二 overlay 挂载的**：从 dsh 启动配置（cordis.yml 的 plugins 列表或 `--patch` 参数）移除 `weiwen-law.patch.yml` 引用，重启生效。
-- 移除后 Agent 不再获得 6 个白箱自查工具，也不再有 3 道硬闸门；插件本身不写持久状态，卸载即干净。
+- 移除后 Agent 不再获得 6 个白箱自查工具，也不再有 3 道硬性闸门与审计钩子；插件本身不写持久状态，卸载即干净。
 
 ### 日常使用 vs 压测
 
@@ -259,7 +281,7 @@ dsh --profile web
 ## 开发（Development）
 
 - **依赖**：Node.js `^22.19 || >=24`；运行时依赖仅 `@deepseek-ai/dsh-tools`（peerDependency，可选）。
-- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **196/196 全绿**（commit `8a5af07` 复测）。
+- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **282/282 全绿**。
 - **构建**：无需构建（纯 ESM + yml overlay）；修改 `src/core/engine.mjs` 后重跑 `npm test` 回归。
 - **贡献**：框架本体（心法层）冻结于基础版仓库，本活系统版承载工程迭代；改动请基于本仓库 PR，并附 `node --test` 实测输出。
 
