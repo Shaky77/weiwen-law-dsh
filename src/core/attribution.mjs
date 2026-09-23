@@ -172,18 +172,40 @@ const isDeleteWord = (w) => {
   return l === 'file-delete' || l === 'cred-delete';
 };
 
-// [成语层 · 收录] —— 第三层＝**固定搭配的整体语义**，不可由字级 / 词级推导：
-//   实测 `rsync --delete`（真删除）与 `docker run --rm`（容器清理）**词形同族、语义相反**
-//   ⇒ 只能作为**典的条目**收录（与「破坏标记有限可封闭枚举」同源：有限封闭集、可穷尽）。
-//   ⚠️ 这是**收录**，不是"加规则"：不假装能从 `--rm` 推出"非破坏"，只登记这条搭配的既有语义。
-//   ⚠️ 也不等同于"豁免名单"：它以 **(宿主, 选项) 搭配**为键 —— 是成语，不是词。
-const IDIOM_NON_FS = [
-  { host: /^(?:docker|podman|nerdctl)$/i, opt: /^--?rm$/i, note: '容器生命周期清理，不触碰文件系统' },
+// [成语层 · 事件条目]（2026-09-23 安裁定：「成语＝**浓缩的事件**」）
+//   一条成语把 (动作 · 作用域 · 结果) **压缩进词形** ⇒ 判据层按槽位读不出来（`删库跑路` 无路径落点，
+//   `docker --rm` 词形同族却语义相反）。故成语层的职责不是"豁免名单"，而是**解压**：
+//   把浓缩的事件**展开成四槽**（谓语=动作 / 状语=方式 / 宾语+定语=作用域 / 补语=结果），再交判据。
+//   - `surfaces` 只是该事件的**已知表面形式**（宿主·选项·词形），不是条目本身；
+//     未来 D 以别的形式进来（中文成语、新写法、新工具），只要**事件形态**相同 → 映射成立。
+//     这正是安说的「未来某个 D 出现时，那个成语或那个事件触发，互相映射，就有解了」的工程落点。
+//   - `fs` 是展开出来的**结果槽**：该事件是否落到文件系统。判据只消费这个槽，不认识名字。
+//   ⚠️ 条目是**收录**（有限封闭集，与「破坏标记可穷尽」同源），不是推导 —— 不假称能由字级推出。
+const IDIOM_EVENTS = [
+  {
+    act: 'remove', scope: 'container', result: 'lifecycle-cleanup', fs: false,
+    surfaces: [{ host: /^(?:docker|podman|nerdctl)$/i, opt: /^--?rm$/i }],
+    note: '容器生命周期清理，不触碰文件系统',
+  },
+  {
+    act: 'delete', scope: 'database', result: 'irreversible', fs: true,
+    surfaces: [{ word: /删库跑路/ }],
+    note: '中文浓缩事件：词形无路径落点，作用域（数据库）与结果（不可逆）**压缩在词里**，须由条目展开',
+  },
 ];
-const idiomNonFs = (seg, opt) => {
-  const first = String(seg).split(CMD_TOKEN_SPLIT).filter(Boolean)[0] ?? '';
-  return IDIOM_NON_FS.some((it) => it.opt.test(opt) && it.host.test(first));
-};
+/** 成语事件展开：给定段的**表面形式**，查出它是哪个事件（未收录 ⇒ null，交常规判据）。 */
+function idiomEventOf(bare, opt) {
+  const first = String(bare).split(CMD_TOKEN_SPLIT).filter(Boolean)[0] ?? '';
+  for (const ev of IDIOM_EVENTS) {
+    for (const sf of ev.surfaces) {
+      if (sf.host && sf.opt && sf.host.test(first) && sf.opt.test(opt)) return ev;
+      if (sf.word && sf.word.test(String(bare))) return ev;
+    }
+  }
+  return null;
+}
+const idiomNonFs = (bare, opt) => idiomEventOf(bare, opt)?.fs === false;   // 展开结果槽：不落文件系统 ⇒ 不算破坏
+const idiomHitsFs = (bare) => idiomEventOf(bare, '')?.fs === true;          // 展开结果槽：落文件系统（浓缩事件）
 
 /** S 的**套嵌法则**（唯一一条）：一段文本的「动作位」（谓语位）是否删除。
  *  动作位 ＝ 第一个非选项词（命令 / 代码段首）∨ 代码调用名（`name(` 形态）。
@@ -192,7 +214,10 @@ const idiomNonFs = (seg, opt) => {
 function atActionSlot(text) {
   const s = String(text || '');
   const head = s.split(CMD_TOKEN_SPLIT).filter(Boolean).find((t) => !t.startsWith('-'));
-  if (head && isDeleteWord(head)) return true;    // 槽位 1 **接受路径形式**（`/bin/rm -rf /` 是真命令的路径写法）
+  // ⚠️ CJK 段不在这里按"首词"查：中文无分词符，head 可能是**整句**（`清理一下缓存`），
+  //    而 `nameLayer` 是给**标识符**设计的（词典子串扫描）⇒ 拿整句当名字查会过宽（"提到"读成"在做"）。
+  //    中文段统一交给 `cjkActionSlot`（词典子串 + **落点判据**），此处跳过。
+  if (head && !CJK_RE.test(head) && isDeleteWord(head)) return true;   // 槽位 1 **接受路径形式**（`/bin/rm -rf /` 是真命令的路径写法）
   for (const m of s.matchAll(CALL_NAME)) if (isDeleteWord(m[1])) return true;
   return false;
 }
@@ -203,17 +228,39 @@ function atActionSlot(text) {
  *  删除动作必须有一个可删的**路径**。故判据 ＝ (子命令位破坏词素) × (自由路径宾语)。
  *  - "自由"＝ 不被选项引导：`kubectl delete -f /manifest.yaml` 的路径是 `-f` 的**参数**，不是宾语 ⇒ 不算。
  *  - 槽位 1 归 `atActionSlot`（保持既有口径：命令名即动作），此处只管槽位 2。 */
+/** 落点判据（唯一一条，槽位2 / 中文句层共用）：段内是否存在**自由路径宾语**。
+ *  "自由"＝ 不被选项引导：`kubectl delete -f /manifest.yaml` 的路径是 `-f` 的**参数**，不是宾语 ⇒ 不算。 */
+function hasFreeFsObject(toks) {
+  for (let i = 1; i < toks.length; i++) {
+    if (!toks[i].startsWith('/')) continue;                 // 只认绝对路径（文件系统落点）
+    if (toks[i - 1].startsWith('-')) continue;              // 选项参数 ≠ 自由宾语
+    return true;
+  }
+  return false;
+}
+
+/** ★ 中文句层（2026-09-23 补）：CJK 是**无分词符**的孤立语 —— `把 /data 目录删掉` 按空格切成
+ *  ['把','/data','目录删掉']，动作位落在"把"上 ⇒ **整句看不见动词**。
+ *  而**字层 `nameLayer` 早有解法**（注释原话：「CJK 为孤立语素、靠连写，无分词符 → 改用词典子串扫描，
+ *  这正是中文同构适用的工程落地点」）—— 只是**没套嵌到句层**。
+ *  ⇒ 句层沿用**同一机制**（段内用词典定位词素，不按位置切）：是套嵌，不是新通道、不是新词表。
+ *  ⚠️ 仍须配**落点判据**（与槽位2 同一条）才不把"提到"读成"在做"：
+ *    `清理一下缓存`（无路径）不判破坏，`清空 /var/log`（有路径）才判。 */
+const CJK_RE = /[㐀-鿿]/;
+const CJK_DELETE_WORDS = VERB.delete.filter((w) => CJK_RE.test(w));   // 从**字典派生**，不手写中文词表
+function cjkActionSlot(bare) {
+  if (!CJK_RE.test(bare)) return false;                               // 非中文段走既有槽位机制
+  const toks = String(bare).split(CMD_TOKEN_SPLIT).filter(Boolean);
+  if (!hasFreeFsObject(toks)) return false;                           // 无文件系统落点 ⇒ 不是"删文件"事件
+  return CJK_DELETE_WORDS.some((w) => bare.includes(w));              // 词典子串扫描（与 nameLayer 同机制）
+}
+
 function subSlotDestructive(bare) {
   const toks = String(bare || '').split(CMD_TOKEN_SPLIT).filter(Boolean);
   const nonOpt = toks.filter((t) => !t.startsWith('-'));
   const slot2 = nonOpt[1];
   if (!slot2 || slot2.startsWith('/') || !isDeleteWord(slot2)) return false;   // 槽位须是**词**，不是路径
-  for (let i = 1; i < toks.length; i++) {
-    if (!toks[i].startsWith('/')) continue;                 // 只认绝对路径（文件系统落点）
-    if (toks[i - 1].startsWith('-')) continue;              // 选项参数（如 `-f /manifest.yaml`）≠ 自由宾语
-    return true;
-  }
-  return false;
+  return hasFreeFsObject(toks);
 }
 
 /** 字典读法总入口：命令串里是否存在删除标记（＝ VERB.delete 词族落在**动作位**）。 */
@@ -225,6 +272,8 @@ function lexiconDestructive(cmd) {
     const bare = stripData(s);                                    // ④ 数据边界：引号内不参与位置判定
     if (atActionSlot(bare)) return true;                          // ① 动作位＝槽位 1
     if (subSlotDestructive(bare)) return true;                    // ② ★ 子命令位＝槽位 2 × 自由路径宾语
+    if (cjkActionSlot(bare)) return true;                         // ②′ ★ 中文句层（无分词符 ⇒ 词典子串扫描，与字层同机制）
+    if (idiomHitsFs(bare)) return true;                           // ⑥ ★ 成语层**展开**：浓缩事件的作用域/结果在词里
     const head = s.split(CMD_TOKEN_SPLIT).filter(Boolean)[0] ?? '';
     if (INTERPRETER_HEAD.test(head)) {                            // ③ ★ 套嵌：递归下降一层（用**原文**：引号内是代码）
       const code = s.slice(s.indexOf(head) + head.length);
