@@ -368,6 +368,36 @@ function permEffect(tok) {
 //   ② **单文件型**（密钥文件）：**取值参与** —— ∅ / ALL 才是毁坏，而 `700` 正是 shadow/passwd **该有**的模式（不得误伤）。
 const PERM_CONTAINER_SCOPE = /^(?:\/|(\/(etc|boot|proc|sys)))$/;
 const PERM_FILE_SCOPE = /^(?:\S*(shadow|passwd))$/;
+
+// ---- [2026-09-23 · 作用域判据反转枚举方向] ----
+// 旧判据把「系统级」**列举**成目录名单（裸根 / 4 个目录 / shadow|passwd），且 `SYS_DELETE` 只匹配
+// **顶层目录本身**（`/(etc|…)(\s|$)`）⇒ `/etc/nginx`、`/usr/bin/sudo`、`/bin/bash` 全部看不见。
+// 准确率实测（外部独立标注集）4 条真漏全源于此：`chmod a-rwx /usr/bin/sudo` / `chmod 0 /bin/bash`
+// / `mv /etc /etc.bak` / 嵌套代码删非裸根。
+//
+// **反转枚举方向**：不列举「哪些目录危险」（开放集，追不完），而列举「哪些域安全」（有限封闭集）。
+//   这与安 09-20 原话同构 —— 「破坏标记是有限的、可封闭枚举的；只读命令是无限的、开放的」：
+//   此处 **用户工作域是有限封闭的，系统域是开放的**。
+// 系统域取 **FHS 标准前缀**（有限封闭集，由标准定义、非随手列举）；用户工作域显式排除（避免误伤）。
+const FHS_PREFIX = /^\/(?:etc|bin|sbin|usr|lib|lib64|var|boot|proc|sys|dev|run|opt|srv|root)(?:\/|$)/;
+const USER_SPACE = /^(?:~|\$HOME|\.{1,2}(?:\/|$))|^\/(?:tmp|var\/tmp|home)(?:\/|$)/;
+/** 是否系统级落点：裸根 ∨ FHS 标准前缀，且不在用户工作域内 */
+const isSystemPath = (p) => {
+  const s = String(p ?? '').replace(/['"]/g, '');
+  return (/^\/$/.test(s) || FHS_PREFIX.test(s)) && !USER_SPACE.test(s);
+};
+/** mv 迁移系统级目录（旧判据 `mv\s+\/\s` 只认裸根 ⇒ `mv /etc /etc.bak` 漏） */
+const mvSystemPath = (cmd) => {
+  const m = /\bmv\s+(-{1,2}\S+\s+)*(\S+)/.exec(String(cmd));
+  return !!m && isSystemPath(m[2]);
+};
+/** 嵌套代码删除：调用名是删除词素 ∧ 括号内首个引号参数是系统级落点（旧判据只认裸根 `['"]\/['"]`） */
+const codeDelSystemPath = (cmd) => {
+  const m = /\b(?:[A-Za-z_$][\w.$]*[.:])?(?:rmtree|rmdir|rmSync|rmdirSync|unlinkSync|remove|unlink|delete|erase|purge)\s*\(([^)]*)\)/i.exec(String(cmd));
+  if (!m) return false;
+  const q = /['"]([^'"]+)['"]/.exec(m[1]);
+  return !!q && isSystemPath(q[1]);
+};
 /** 段内 chmod 句读：返回 {effect,args}；非 chmod 段 ⇒ null（选项前置/后置都读，不靠位置枚举） */
 function chmodSentence(seg) {
   const toks = String(seg ?? '').split(/\s+/).filter(Boolean);
@@ -384,7 +414,8 @@ function chmodSystemDestruction(cmd) {
     const ch = chmodSentence(seg);
     if (!ch) continue;
     if (ch.args.some((t) => PERM_CONTAINER_SCOPE.test(t))) return true;            // ① 容器型
-    if (ch.effect && ch.args.some((t) => PERM_FILE_SCOPE.test(t))) return true;    // ② 单文件型（仅端点）
+    // ② 单文件型：**仅端点** × **系统级落点**（凭证文件 ∨ FHS 前缀 —— 反转枚举方向，见 isSystemPath）
+    if (ch.effect && ch.args.some((t) => PERM_FILE_SCOPE.test(t) || isSystemPath(t))) return true;
     if (ch.effect && /\bfind\s+\/\s/.test(seg)) return true;                       // ③ find / … -exec chmod
   }
   return false;
@@ -490,13 +521,13 @@ export const DEFAULT_RIGID_ANCHORS = [
       // 分形微观评估：把"破坏系统可用性"的意图（换动词/嵌套形态）归到同一维度，
       // 而非逐动词枚举——凡针对根/系统文件的销毁·迁移·权限清零·强制 fsck·覆写，一律拦截。
       return (
-        /\bmv\s+\/\s/.test(cmd) ||                                                  // 迁移根（mv / → 某处）
-        chmodSystemDestruction(cmd) ||                                              // 权限推至极端（容器型与取值无关 / 密钥文件仅端点）
+        mvSystemPath(cmd) ||                                                        // 迁移系统级目录（不只是裸根）
+        chmodSystemDestruction(cmd) ||                                              // 权限推至极端（容器型与取值无关 / 系统级文件仅端点）
         /\bfsck\s+-[a-z]*y\b/.test(cmd) ||                                          // 强制 fsck（可能损毁文件系统）
         /\btruncate\s+-s\s+0\s+(\/(etc|boot|proc|sys)\/|\/\S*(shadow|passwd))\b/.test(cmd) || // 清空系统文件
         /\bcp\s+\/dev\/null\s+\S*(shadow|passwd)\b/.test(cmd) ||                    // 覆写凭据文件
         /\bfind\s+\/\s+-type\s+f\s+-exec\s+chmod\s+0+\s+/.test(cmd) ||             // 递归权限清零
-        /\b(os\.remove|os\.rmdir|shutil\.rmtree|fs\.rmSync|fs\.rmdirSync|fs\.unlink|fs\.rmdir|rmSync|rmtree|unlink)\s*\(\s*[^)]*['"]\/['"]/.test(cmd) // 嵌套代码删根
+        codeDelSystemPath(cmd)                                                     // 嵌套代码删：系统级落点（不只裸根）
       );
     },
   },
