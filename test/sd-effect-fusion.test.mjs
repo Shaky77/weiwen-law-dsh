@@ -48,7 +48,11 @@ test('融合·P4 良性读取 + 可识别 → allow 附 sdSignal，引擎 verdic
 
 // ── 融合后：引擎 allow + 效应不可识别 + S 相关 → 升级 review（去糟粕 / M 闸门）──
 test('融合·allow + 效应不可识别 + S相关 → 升级 review（弃盲目 unconfoundedness）', () => {
-  const call = { name: 'exec', args: { command: 'rm -rf ./cache' } };
+  // [2026-09-20 输入换型 · 扣子 coze/51 方向 · 同构回填] 原输入 `rm -rf ./cache` 现在被**引擎自己**的
+  //   痕锚归属判据拦成 review（无锚 ⇒ review）⇒ 引擎先 review，fusion 只透传，
+  //   本测试要考的「engine allow 之上做 M 闸门升级」这条路径就不会被走到。
+  //   换成引擎放行的**可逆窗口**动作（cp），保留本测试的主题不变。
+  const call = { name: 'exec', args: { command: 'cp -r ./cache ./cache-bak' } };
   const r = fusedDecide(call, { engine: freshEngine(), psi: 0.7, overlap: 0.01, sRelevant: true });
   assert.equal(r.kind, 'review');
   assert.equal(r.sdUncertain, true);
@@ -71,13 +75,15 @@ test('融合·P5 明文破坏 → 引擎 deny 透传', () => {
   assert.equal(r.kind, 'deny');
 });
 
-// ── 反向保护：P1 漏放（已知细枝盲区）在融合后仍存在，融合未掩盖它 ──
-test('融合·P1 rm -rf . 仍漏放（融合不掩盖已知细枝盲区，待核心修复）', () => {
+// ── 反向保护：P1（已知叶级盲区）在融合后的去向 ──
+test('融合·P1 rm -rf . → 盲区已由痕锚归属判据关闭（不再靠 fusion 兜）', () => {
   const call = { name: 'exec', args: { command: 'rm -rf .' } };
   const r = fusedDecide(call, { engine: freshEngine(), psi: 0.9, overlap: 0.5, sRelevant: true });
-  // 注意：此处 overlap 可识别 + sRelevant，传感器本应加重信号，但 P1 引擎本身已 ALLOW，
-  // 暴露的是 engine.mjs SCOPE_REL_FULL 正则盲区（禁区，须另授权修）。融合层如实暴露，不粉饰。
-  assert.equal(r.kind, 'allow');
+  // [2026-09-20 判据变更 · 扣子 coze/51 方向 · 同构回填] 本测试原记录：P1（`rm -rf .`）在引擎层是 ALLOW，
+  //   属 engine.mjs SCOPE_REL_FULL 正则的已知叶级盲区（禁区，需单独授权才动），fusion 只诚实暴露、不粉饰。
+  //   现已由**结构判据**（scar 类动作 + 无锚可归 ⇒ REVIEW）关闭 —— 不依赖那条正则、不补路径/词表：
+  //   引擎自己给出 review ⇒ fusion 透传。
+  assert.equal(r.kind, 'review');
 });
 
 // ── 杠1 回归锁：缺省 fail-open → fail-closed（扣子 2026-09-09 拦）──

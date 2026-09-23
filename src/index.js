@@ -39,7 +39,7 @@ function logline(s) {
 //    （不调 recordDeduction / 不动 failureStreak / 不动 sessWritten）⇒ 纯读，可安全补算。
 function deduceBranches(engine, call) {
   try {
-    const r = engine.deduceRisk(call);
+    const r = engine.deduceRisk ? engine.deduceRisk(call) : null;
     return r?.branches ?? null;
   } catch (e) {
     logline(`deduceRisk failed: ${e?.message ?? e}`);
@@ -138,6 +138,60 @@ function haltFeedback(bw, bugKey) {
 const name = 'weiwen-law';
 const inject = ['tools'];
 
+// ═══════════ 锚源定位（Y 轴定案 2026-09-20 · 2026-09-24 同构回填）═══════════
+// 被锁定的结构（＝安的问题「可能言窗口面，本就是噪音？」的落地）：
+//   **授权锚只从结构入口来（位置确定），不从文本内容识别。** 窗口面降级为**纯观测**：只报"看到了什么"
+//   （形状 / role 词表 / 线索），**一律不授权**。
+//   实测（直读 `declaredAnchors`，11 组样本）—— 一条真失效，一条是**读错**（安 2026-09-20 纠正）：
+//     (a) **指针被误当容器**（旧措辞"假接通／通道已通"**已废弃**）：委托人最新一条是"继续／好的／开始吧"
+//         ⇒ 直读 declaredAnchors 得 paths=[] nouns=[]。若照 X 轴读法判"抽不出锚＝噪音"，就丢了真相：
+//         **"继续"不携带内容，但它不是无信息 —— 它是指针**，引用的是**在场的东西**：① 上下文；
+//         ② **一个真实被打断的在飞行为**。⇒ 正确定性：**内容量可作指针（reference），不可作锚（anchor）**；
+//         "抽不出锚"≠"无锚"，可能只是"锚不在本帧文本里"。故窗口面该干的是**指向**；锚源必须在**结构位置**上。
+//         ⚠️ 为何废弃旧措辞：说"假接通"会把下一个维护者引回"再修修通道"的 X 轴惯性（枚举永远补不完）。
+//     (b) **假人证（真失效）**：agent 自述含真路径（"我在想，接下来我要清空 /app/data" ⇒ paths=[/app/data]）
+//         ⇒ 一旦 role 判别出现偏差被采信，**真路径进池 ⇒ 不可逆动作放行** —— 比"无人证"更坏。
+//   🔴 推论（安 2026-09-20 实例）：**中断 ≠ 撤回**。委托人中断 / 只说"继续"时，范围**不消失**
+//     （在场量不因无信息帧而离场），只有**显式撤回**才让范围离场 ⇒ 契约纪律见 `setPrincipalScope`。
+//   结构入口 = `setPrincipalScope()`（模块级 API，由宿主集成方在启动边界调用）。
+//   它**不是工具** ⇒ 模型调不到 ⇒ **结构上不可能自我授权**（主体分离由位置保证，不靠内容判别）。
+//   入口未接 ⇒ 锚池留空 ⇒ 不可逆动作交人工（fail-closed）。**这是设计，不是漏读消息。**
+const PRINCIPAL_ROLE_HINT = /^(user|human|principal|operator|owner)$/i;
+
+// 结构入口（宿主集成方调用；模型不可达）。返回上一值便于回退，不给"开关式骑墙"留口。
+let _hostPrincipalScope = null;
+// 范围变更留痕（append-only 观测，上限 20）：**撤回必须有痕**。
+//   委托人收回授权＝责任归因的关键事件；静默清空不可溯 ⇒ 事后查不出"什么时候没的范围"、
+//   也分不清"委托人撤了"还是"宿主实现把中断当成了撤回"。
+const _scopeChanges = [];
+/**
+ * 宿主在**启动/step 边界**显式声明任务范围（授权锚的唯一来源）。
+ *
+ * ⚠️ 契约纪律（2026-09-20 · 安的实例：「误触打断 ⇒ 只回"继续" ⇒ agent 仍知道要做什么」）：
+ *   **「本帧没有新声明」≠「撤回」**。
+ *   · 委托人中断 / 只说"继续" ⇒ 宿主**什么都不做** ⇒ 范围**保持有效**
+ *     （范围的在场量不因某一帧无信息而消失 —— "继续"是指针，指向仍在场的被打断行为）；
+ *   · 只有委托人**明确收回**时才传 null / 空串 ⇒ 显式撤回（留痕）。
+ *   若把"没新声明"实现成"清空"，则每一次误触打断都静默撤回授权 ⇒ 合法链全交人工，
+ *   且丢失无痕：使用者只体感"更啰嗦"，查不出为什么。
+ * @param {string|null} text 非空串＝声明/替换；null/空串＝**显式撤回**
+ * @returns {string|null} 调用前的值
+ */
+export function setPrincipalScope(text) {
+  const prev = _hostPrincipalScope;
+  const next = typeof text === 'string' && text.trim() ? text : null;
+  _hostPrincipalScope = next;
+  // 只在**状态真变化**时留痕：重复声明/重复清空不是"变更"，不得刷屏（留痕要能一眼看出"何时没的"）。
+  if (prev !== next) _scopeChanges.push({
+    at: new Date().toISOString(),
+    kind: next === null ? 'revoke' : prev === null ? 'declare' : 'replace',
+    from: prev === null ? null : prev.slice(0, 120),
+    to: next === null ? null : next.slice(0, 120),
+  });
+  if (_scopeChanges.length > 20) _scopeChanges.shift();
+  return prev;
+}
+
 // ---------- 结构入口（宿主集成方侧；模型不可达）：D 破窗复位 ----------
 // 为何这个入口不可缺（结构理由，不是便利功能）：
 //   破窗一旦成立，`pre-execute` 会拒绝**一切**调用 —— **连同"修复动作本身"** ⇒ 宿主侧若无复位入口，
@@ -164,7 +218,7 @@ export function healBrokenWindow(note) {
     try {
       // 如实记数：先读**复位前**的状态，避免"把没破的也算成治好"
       //   （判据与引擎同源：本侧破窗只由 failureStreak 累积达成，不读不存在的旗标）
-      if (e.failureStreak >= e.maxFailureStreak) wereBroken += 1;
+      if (e.windowBroken || e.failureStreak >= e.maxFailureStreak) wereBroken += 1;
       e.healWindow();
     } catch { /* 单个实例异常不得拦住其余实例 */ }
   }
@@ -173,6 +227,54 @@ export function healBrokenWindow(note) {
   if (_windowHeals.length > 20) _windowHeals.shift();
   logline(`healBrokenWindow(${text || '未给理由'}) — instances=${_liveEngines.size}, wereBroken=${wereBroken}`);
   return rec;
+}
+
+// ---------- 窗口面观测辅助（2026-09-20 · 同构回填）----------
+// 只**观测**，不取锚：形状 / role 词表 / 线索如实记录，授权一律不从此处产生。
+function textOfContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+function readMessageStream(payload) {
+  const msgs = payload?.messages;
+  if (!Array.isArray(msgs)) {
+    return { ok: false, shape: msgs === undefined ? 'absent' : typeof msgs, rolesSeen: [], principalClue: null, assistantSeen: false, count: 0 };
+  }
+  const roles = [];
+  let principalClue = null;
+  let assistantSeen = false;
+  for (let i = msgs.length - 1; i >= 0; i -= 1) {
+    const m = msgs[i];
+    if (!m || typeof m !== 'object') continue;
+    const raw = m.role;
+    const role = Array.isArray(raw) ? String(raw[0] ?? '') : raw === undefined || raw === null ? '' : String(raw);
+    if (role) roles.push(role);
+    if (PRINCIPAL_ROLE_HINT.test(role)) {
+      // **仅作线索**（给人看"宿主消息里最近一条疑似委托人的话是什么"），**不作授权**。
+      if (!principalClue) {
+        const t = textOfContent(m.content ?? m.text ?? '');
+        if (t.trim()) principalClue = t;
+      }
+    } else if (role && !assistantSeen && /^(assistant|model|agent|ai)$/i.test(role)) {
+      assistantSeen = textOfContent(m.content ?? m.text ?? '').trim().length > 0;
+    }
+  }
+  return { ok: true, shape: 'array', rolesSeen: [...new Set(roles)], principalClue, assistantSeen, count: msgs.length };
+}
+
+// 结构入口探测（**观测**，不是猜字段名）：把宿主交给插件的**结构对象**的键集记下来。
+//   payload.agent / apply(ctx) 的 ctx 若真挂了任务范围（scope / task / instructions 之类），那才是锚该待的位置；
+//   此处不认定任何字段名，只如实吐键集 ⇒ 实机跑一次，用观测决定要不要把结构入口接到那里。
+function observeBoundary(obj) {
+  if (!obj || typeof obj !== 'object') return { present: false, kind: obj === undefined ? 'absent' : typeof obj, keys: [] };
+  const keys = Object.keys(obj).sort();
+  return { present: true, kind: Array.isArray(obj) ? 'array' : 'object', keys, keyCount: keys.length };
 }
 
 function apply(ctx) {
@@ -184,14 +286,60 @@ function apply(ctx) {
   if (_liveEngines.size > 32) _liveEngines.delete(_liveEngines.values().next().value);
   logline('apply() entered — 注册 tools/pre-execute, agent/pre-step, tools/result 与白箱自查工具');
 
+  // [2026-09-20 · 同构回填] 授权锚：**只由结构入口喂养**（`setPrincipalScope`，宿主集成方调用）。窗口面不再供养。
+  // 委托人声明的任务范围在会话内持续有效；入口未接 ⇒ 恒 null ⇒ 锚池空 ⇒ 不可逆动作交人工（fail-closed）。
+  const channel = {
+    authority: 'structural-entry',      // 授权来源声明：位置确定，非内容识别
+    authoritySeen: _hostPrincipalScope !== null,
+    authorityChanges: [..._scopeChanges],  // 变更留痕（declare/replace/revoke）：撤回**可溯**，不静默
+    // 中断 ≠ 撤回（2026-09-20 · 安的实例）：委托人中断 / 只说"继续" ⇒ 宿主不动 ⇒ 上面这次范围**保留**；
+    //   只有显式 revoke 才让范围离场。故此自报读作纪律说明：空池只可能来自"入口未声明"或"显式撤回"，
+    //   **不可能**来自"本帧没新声明"。
+    steps: 0,
+    messagesSeen: 0,
+    shape: 'absent',
+    rolesSeen: [],
+    clueSeen: false,                    // 窗口面线索（**仅供人看，不授权**）
+    clueNonAuthoritative: true,
+    lastClue: null,
+    assistantSeen: false,
+    lastObservedAt: null,
+    agentBoundary: observeBoundary(undefined),
+    applyCtxBoundary: observeBoundary(ctx),
+    structGap: '授权锚须由宿主在结构边界提供（setPrincipalScope：启动 scope / 任务配置）。窗口面文本是观察面，不作锚源（噪音）⇒ 入口未接时锚池留空、不可逆动作交人工 = 设计而非漏读。',
+    // [2026-09-20 · 位置量观测] 宿主在门这一侧**自带**的结构位置：`agent`（谁在调）/ `parent`（从哪派生）。
+    //   纯观测、**不参与裁决**（授权仍只认委托人声明的范围）；用途＝实机一跑即知该宿主是否给位置量，
+    //   以及**派生调用有没有被计数**（＝"门覆盖全路径"的可观测证据，非推测）。
+    callSites: { total: 0, withAgent: 0, withParent: 0 },
+    // [2026-09-21 · 回执门观测] 第三个真能拦的门位置在回执侧。这里只**如实记数**，供实机跑一次即知
+    //   门有没有被派发、失败回执有没有到达、阻断有没有真的发生 —— 不猜宿主行为。
+    receiptGate: {
+      seen: 0,            // 经过回执门的调用数（含成功，证明门被派发）
+      failedSeen: 0,      // 其中带失败信号的（门只对这些施加裁决）
+      blocked: 0,         // 实际阻断数（回执被改写成纠错错误）
+      failOpen: true,     // 监听器抛错 ⇒ accept：门不得把健康运行弄坏
+      cap: engine.maxFailureStreak,
+      lastAt: null,
+      lastReason: null,
+      lastStreak: null,
+    },
+  };
+
   // ---------- R / D / S / H / M 总裁决：工具调用前置闸门（waterfall） ----------
   ctx.on('tools/pre-execute', async (exec, next) => {
+    channel.callSites.total += 1;
+    if (exec?.agent !== undefined) channel.callSites.withAgent += 1;
+    if (exec?.parent !== undefined) channel.callSites.withParent += 1;
     const a = exec?.arguments ?? {};
     const call = {
       name: exec?.name,
       args: a,
       command: a.command,
       code: a.code,
+      // [2026-09-20 · 锚源定案 · 同构回填] 授权锚＝宿主在**结构边界**声明的任务范围（`setPrincipalScope`）。
+      //   来源**不是**消息文本（窗口面是观察面 ⇒ 噪音），也**不是** exec 视图里猜的字段名。
+      //   入口未接 ⇒ null ⇒ 锚池留空 ⇒ 不可逆动作交人工（fail-closed）；**绝不臆造授权**（假人证比无人证更坏）。
+      taskAnchor: _hostPrincipalScope,
       // 将第一BUG结构性标志提到顶层，供 engine.checkFirstBug 读取
       // （DSH 在 exec.arguments 上传这些标志；引擎在 call 上读取）
       selfReference: a.selfReference,
@@ -249,6 +397,21 @@ function apply(ctx) {
 
   // ---------- H 内 H 不可侵：步骤前置闸门（waterfall，消息级） ----------
   ctx.on('agent/pre-step', async (payload, next) => {
+    // [2026-09-20 · 窗口面＝观察面 · 同构回填] 只**观测**，不取锚：形状 / role 词表 / 线索如实记录，
+    //   授权一律不从此处产生（否则＝把 Y 轴的量寄存在 X 轴的容器里；两种失效模式见文件顶部实测）。
+    const rd = readMessageStream(payload);
+    channel.steps += 1;
+    channel.shape = rd.shape;
+    channel.rolesSeen = rd.rolesSeen;
+    channel.messagesSeen = rd.count;
+    channel.assistantSeen = rd.assistantSeen;
+    channel.clueSeen = rd.principalClue !== null;
+    if (rd.principalClue) channel.lastClue = rd.principalClue.slice(0, 200);
+    channel.authoritySeen = _hostPrincipalScope !== null;
+    channel.authorityChanges = [..._scopeChanges];   // 留痕刷新（撤回可溯）
+    channel.agentBoundary = observeBoundary(payload?.agent);
+    channel.lastObservedAt = new Date().toISOString();
+    logline(`pre-step observed (shape=${rd.shape}, roles=[${rd.rolesSeen.join(',')}], clue=${rd.principalClue ? 'yes' : 'no'}, authority=${channel.authoritySeen ? 'structural-entry' : 'NONE'}) — 窗口面不授权，锚池不由此填充，不猜`);
     const decision = engine.decidePreStep(payload?.messages);
     // reject（明确越界）与 review（定义不明/判不出来）同作阻断、不扩散。
     // review 即"搁置返回用户决策"：宁可先拦截，待用户裁决后再执行，不可直接放。
@@ -287,7 +450,9 @@ function apply(ctx) {
   ctx.on('tools/post-execute', async (exec, result, next) => {
     let decision = null;
     try {
+      channel.receiptGate.seen += 1;
       if (isFailedReceipt(result)) {
+        channel.receiptGate.failedSeen += 1;
         const bw = engine.breakAtReceipt();
         if (bw) {
           const call = {
@@ -311,6 +476,10 @@ function apply(ctx) {
           };
           // 日志只在阻断确实交付后才写：若构造 feedback 时抛错，下面 catch 会降级为 accept，
           // 先写日志就会留下"拦了其实没拦"的假痕。
+          channel.receiptGate.blocked += 1;
+          channel.receiptGate.lastAt = new Date().toISOString();
+          channel.receiptGate.lastReason = bw.reason;
+          channel.receiptGate.lastStreak = `${bw.streak}/${bw.cap}`;
           logline(`post-execute ${exec?.name} -> block（D 破窗止损落在回执，${bw.streak}/${bw.cap}，bugKey=${bugKey}）`);
         }
       }
@@ -415,6 +584,23 @@ function apply(ctx) {
       return {
         stops: engine.bugStop.snapshot(),
         note: 'halted 且 resolved=false 的环节禁止重入；须 反推→溯源→修复(验证) 方可重入。',
+      };
+    },
+  }));
+
+  // [2026-09-20 · 锚源自报 · 2026-09-24 同构回填] 把"猜宿主字段名 / 猜哪条消息算授权"换成"看事实"：实机跑一次即可观测
+  //   ① 宿主是否真把消息流交给插件（shape / roles 词表 / 线索）；② 结构入口是否接通；③ 锚池里有什么；
+  //   ④ 宿主的结构对象（payload.agent / apply ctx）上有哪些键 —— 这是**接真入口**所需的事实，不猜字段名。
+  ctx.tools.register(defineTool({
+    name: 'query_anchor_channel',
+    description: '锚源白箱自报：结构入口（宿主声明的任务范围）是否接通、锚池里有什么、宿主实际传了什么（消息形状、role 词表、结构对象键集）。窗口面是观察面、**设计上永不授权**；池空即不可逆动作交人工（fail-closed）。',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
+    async execute() {
+      return {
+        adapter: channel,
+        engine: engine.anchorChannel,
+        note: '授权锚唯一来源＝结构入口 setPrincipalScope（宿主在启动/step 边界声明任务范围）；被审计 agent 的自述与窗口面文本**都不授权**（否则＝自我授权 / 假人证）。入口未接 ⇒ 锚池留空 ⇒ 不可逆动作交人工，此为设计而非漏读。',
       };
     },
   }));

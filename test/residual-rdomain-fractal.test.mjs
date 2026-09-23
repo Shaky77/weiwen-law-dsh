@@ -31,7 +31,10 @@ test('洞口1 attribution：正常 git 操作不误判为破坏性（防误伤�
   assert.equal(commandLayer('git checkout -- src/main.js'), 'exec');
   assert.equal(commandLayer('git status'), 'exec');
   assert.equal(commandLayer('git commit -m fix'), 'exec');
-  assert.equal(commandLayer('git push origin main'), 'exec');
+  // [2026-09-24 同构回填 · 判据更新] `git push` 属「对外不可逆」（推送到共享远端）⇒ 已登记进同一
+  //   封闭标记集，归 **network-send**（共享远端 = Macro 域），不再退化成容器 exec。
+  //   本测试**意图不变**（"正常 git 操作不误判为**破坏性**"）—— network-send ≠ exec-destructive，仍不误伤。
+  assert.equal(commandLayer('git push origin main'), 'network-send');
   assert.equal(commandLayer('git pull'), 'exec');
 });
 
@@ -63,10 +66,35 @@ test('洞口1 控制台：git checkout -- 特定文件 → allow（有显式安�
   assert.equal(r.kind, 'allow');
 });
 
-test('洞口1 控制台：rm -rf /tmp/old（具体子路径）→ allow，不回退', () => {
+test('洞口1 控制台：rm -rf /tmp/old（具体子路径）→ 作用域不回退；按痕锚归属判据交人工', () => {
   const e = new WeiwenLawEngine();
   const r = e.decideToolCall({ name: 'exec', args: { command: 'rm -rf /tmp/old' } });
+  // [2026-09-24 同构回填 · 判据变更] 本测试原锁「具体子路径 ⇒ allow，不回退到全量怀疑」。
+  //   新增判据「**scar 类（不可逆）动作 + 归不到任何已声明锚 ⇒ REVIEW**」后本 case 结果变了：
+  //   无 taskAnchor ⇒ 无锚可归 ⇒ 不可逆删除交人工。
+  //   **作用域判据本身没变**（它并不回退：`rm -rf /` 仍是 deny），变的是不可逆动作的缺省去向。
+  assert.equal(r.kind, 'review');
+  assert.equal(r.law, 'R');
+});
+test('洞口1 控制台：声明锚后 rm -rf /tmp/old → allow（可归属，回到原语义）', () => {
+  const e = new WeiwenLawEngine();
+  const r = e.decideToolCall({
+    name: 'exec',
+    args: { command: 'rm -rf /tmp/old' },
+    taskAnchor: '清理 /tmp/old 下的构建产物',
+  });
   assert.equal(r.kind, 'allow');
+  assert.deepEqual([...e.anchorPool.paths], ['/tmp/old']);
+});
+test('洞口1 控制台：声明锚 /tmp/old，但删 /app → review（超出声明范围，归不到锚）', () => {
+  const e = new WeiwenLawEngine();
+  const r = e.decideToolCall({
+    name: 'exec',
+    args: { command: 'rm -rf /app' },
+    taskAnchor: '清理 /tmp/old 下的构建产物',
+  });
+  assert.equal(r.kind, 'review');
+  assert.ok(r.scarUnanchored);
 });
 
 // ===== 洞口2：跨调用「源→汇」组合（FRACTAL_PROPERTY 分形横向递归）=====
