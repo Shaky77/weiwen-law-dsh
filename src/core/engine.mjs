@@ -6,7 +6,7 @@
 // 第一BUG停止闭环状态机：强制走完"断"之后的必然后半程，
 // 未修复前禁止重入，从根上阻断"只反推不修复→无限递归"。
 import { BugStopGuard, bugKeyOf } from './bugstop.mjs';
-import { attributeCall, extractCommand, DELETION_LAYERS, GIT_DESTRUCTIVE } from './attribution.mjs';  // 路径1 归因 + 其产出的删除/破坏类语义层集合（词汇归 attribution 所有，引擎仅消费）
+import { attributeCall, extractCommand, commandLayer, DELETION_LAYERS, GIT_DESTRUCTIVE } from './attribution.mjs';  // 路径1 归因 + 其产出的删除/破坏类语义层集合（词汇归 attribution 所有，引擎仅消费）  // [2026-09-23 字典即S] commandLayer（破坏标记的唯一读法：字典词素 + 工具名封闭集，引擎只消费不自兜底）
 import { R_DOMAIN, FRACTAL_PROPERTY } from './law.mjs';  // R 域刚性锚点常量 + 分形属性常量：destructive 检测须体现 R_DOMAIN 边界法则；跨调用组合须接 FRACTAL_PROPERTY 分形横向递归（接线，非加层）
 
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
@@ -323,6 +323,72 @@ function simulateBranch(s, kind) {
 //   glob 字符类（/[a-zA-Z]*）、cd / 多步组合、尾部后缀（2>/dev/null &）、find / -exec rm、
 //   rsync --delete、fork bomb、sysrq、cat 覆写裸盘、perl unlink glob —— 全部已封。
 const DESTRUCTIVE = /\b(rm|rmdir|shred|unlink|mkfs|mkfs\.\w+|format|dd|truncate|wipefs|rmtree)\b/i;
+// [2026-09-23 · 字典即S · 接线] 动作分量＝**消费 attribution 的剥离结果**，不在此处自兜底。
+//   设计原话（EN 仓 engine L1613，同源）：「破坏标记的识别放在 commandLayer（attribution），本处只消费剥离结果」。
+//   而此处一直留着自带的 DESTRUCTIVE 工具名正则 ⇒ 与字典读法分裂（安 09-23 诊断的「三张表各说各话」）。
+//   commandLayer 现已＝「工具名封闭集 ∪ 字典词素」，故此处改为直接问它：
+//   同义写法（remove_tree / rm_rf / --remove-files）与 `rm -rf /` 走**同一条**判据、得**同一个**判词。
+const segDestructive = (s) => DESTRUCTIVE.test(s) || commandLayer(s) === 'exec-destructive';
+
+// [2026-09-23 · 字典即S · 权限位读法归位] 判据读**效果端点**，不读具体权限值（安 09-23「多音字」）：
+//   全锁 ∅（毁**可用性**）与 全开 ALL（毁**完整性**）是同一属性的两个方向，属同一个
+//   「全局访问控制位被推至极端」的意图；中间常规档（755/644/700…）是日常运维，**不在本判据内**。
+//   旧实现只枚举一个值（`0+`）⇒ `chmod -R 777 /` 与 `chmod -R 000 /` 同命令同动词、只差一个数字而判词相反。
+//   写法空间（八进制含前导 0 与单位数 / 符号写法）是**有限封闭语法**，故可穷尽；工具名空间才是开放集。
+function permEffect(tok) {
+  const parts = String(tok ?? '').split(',').filter(Boolean);
+  if (!parts.length) return null;
+  // ① 八进制写法（允许前导 0）：逐位全 0 ⇒ ∅；逐位全 7 ⇒ ALL；其余为常规档
+  if (parts.every((p) => /^[0-7]{1,4}$/.test(p))) {
+    const ds = parts.map((p) => p.replace(/^0(?=\d)/, ''));
+    if (ds.every((d) => /^0+$/.test(d))) return 'none';
+    if (ds.every((d) => /^7+$/.test(d))) return 'all';
+    return null;
+  }
+  // ② 符号写法：who 必须覆盖全体（a / ugo / 省略）；+rwx ⇒ ALL，-rwx 或 `=`(空) ⇒ ∅，=rwx ⇒ ALL
+  let effect = null;
+  for (const p of parts) {
+    const m = /^([ugoa]*)([+\-=])([rwxXstugo]*)$/.exec(p);
+    if (!m) return null;
+    const who = m[1], op = m[2], perms = m[3];
+    if (!(who === '' || who === 'a' || /^[ugo]{3}$/.test(who))) return null;   // 未覆盖全体 ⇒ 常规档
+    const full = /^(rwx|rwxXst|rwxst)$/.test(perms);
+    if (op === '+' && full) effect = 'all';
+    else if (op === '-' && full) effect = 'none';
+    else if (op === '=' && perms === '') effect = 'none';
+    else if (op === '=' && full) effect = 'all';
+    else return null;
+  }
+  return effect;
+}
+// 权限判据的作用域分**两类**，读法不同 —— 这是结构区别，不是取值枚举（真模型实测后收紧）：
+//   ① **容器型**（裸根 / 整个系统目录的根）：在其根上重写访问控制位 ⇒ 分布被破坏 ⇒ **与取值无关**
+//      —— 「统一模式」只对单文件成立；对整个树统一 644 同样摧毁（目录失去 x ⇒ 不可穿越、程序失去 x ⇒ 不可执行）。
+//      实证：`chmod -R 666 /` 与 `chmod -R o+rwx,g+rwx,u+rwx /`（同样的摧毁，只是取值/写法不端点）。
+//   ② **单文件型**（密钥文件）：**取值参与** —— ∅ / ALL 才是毁坏，而 `700` 正是 shadow/passwd **该有**的模式（不得误伤）。
+const PERM_CONTAINER_SCOPE = /^(?:\/|(\/(etc|boot|proc|sys)))$/;
+const PERM_FILE_SCOPE = /^(?:\S*(shadow|passwd))$/;
+/** 段内 chmod 句读：返回 {effect,args}；非 chmod 段 ⇒ null（选项前置/后置都读，不靠位置枚举） */
+function chmodSentence(seg) {
+  const toks = String(seg ?? '').split(/\s+/).filter(Boolean);
+  const i = toks.indexOf('chmod');
+  if (i < 0) return null;
+  const args = toks.slice(i + 1).filter((t) => t !== '--');
+  const mode = args.find((t) => !t.startsWith('-'));
+  if (!mode) return null;
+  return { effect: permEffect(mode), args };
+}
+/** 权限位判据：按**作用域类型**判（容器型与取值无关 / 单文件型仅端点 / find 递归遍历路径） */
+function chmodSystemDestruction(cmd) {
+  for (const seg of String(cmd ?? '').split(/(?:;|&&|\|\||\||\n)+/)) {
+    const ch = chmodSentence(seg);
+    if (!ch) continue;
+    if (ch.args.some((t) => PERM_CONTAINER_SCOPE.test(t))) return true;            // ① 容器型
+    if (ch.effect && ch.args.some((t) => PERM_FILE_SCOPE.test(t))) return true;    // ② 单文件型（仅端点）
+    if (ch.effect && /\bfind\s+\/\s/.test(seg)) return true;                       // ③ find / … -exec chmod
+  }
+  return false;
+}
 const SCOPE_ROOT = /((^|[\s=:'"(])\/(\*|\[|\.)|\/(\s|$|[;&|<>]|['")])|(^|[\s=:'"(])~\s*$|\/dev\/(sd[a-z]+\d*|nvme\d+n\d+p?\d*)(\s|$|[;&|<>]|['")]))/;
 const SYS_DELETE = /(^|[\s=:'"(])\/(etc|var|usr|bin|sbin|lib|lib64|boot|root|home|opt|srv|mnt|media|dev|proc|sys|run)(\s|$)/;
 const PSEUDO_FS = /(^|[\s=:'"(])\/(dev|proc|sys|run)\/[^\s]+(\s|$)/;
@@ -352,7 +418,7 @@ export const DEFAULT_RIGID_ANCHORS = [
       const cmd = extractShell(call);
       if (cmd) {
         const byCmd = (
-          (DESTRUCTIVE.test(cmd) && (SCOPE_ROOT.test(cmd) || SYS_DELETE.test(cmd) || PSEUDO_FS.test(cmd))) ||
+          (segDestructive(cmd) && (SCOPE_ROOT.test(cmd) || SYS_DELETE.test(cmd) || PSEUDO_FS.test(cmd))) ||
           COMBO_FIND_ROOT_DELETE.test(cmd) ||
           RSYNC_WIPE.test(cmd) ||
           FORK_BOMB.test(cmd) ||
@@ -425,7 +491,7 @@ export const DEFAULT_RIGID_ANCHORS = [
       // 而非逐动词枚举——凡针对根/系统文件的销毁·迁移·权限清零·强制 fsck·覆写，一律拦截。
       return (
         /\bmv\s+\/\s/.test(cmd) ||                                                  // 迁移根（mv / → 某处）
-        /\bchmod\s+(-R\s+)?0+\s+(\/\s*$|(\/(etc|boot|proc|sys)(\/|$))|\S*(shadow|passwd))/.test(cmd) || // 权限清零系统文件（含裸根 / 系统目录 / shadow|passwd）
+        chmodSystemDestruction(cmd) ||                                              // 权限推至极端（容器型与取值无关 / 密钥文件仅端点）
         /\bfsck\s+-[a-z]*y\b/.test(cmd) ||                                          // 强制 fsck（可能损毁文件系统）
         /\btruncate\s+-s\s+0\s+(\/(etc|boot|proc|sys)\/|\/\S*(shadow|passwd))\b/.test(cmd) || // 清空系统文件
         /\bcp\s+\/dev\/null\s+\S*(shadow|passwd)\b/.test(cmd) ||                    // 覆写凭据文件
