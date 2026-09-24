@@ -946,6 +946,7 @@ export class WeiwenLawEngine {
   //   - trauma 为历史刻痕记录（绝对值），不回退当前值。
   // 注意：真实路径为 M → H₀ 分流 → S₀(+1) 或 |S₀(S₀-1)|（见 law.mjs 的 FEEDBACK_LOOP）。
   recordSteady({ positive = 0, negative = 0, trauma = 0, subsystem = 'core', topic = null, detail = null, action = null, attrib = null } = {}) {
+    this._settleMarked = true;      // [2026-09-24] 出口统一落点：本次裁决已落稳态刻痕（幂等依据）
     const sub = this.sBySubsystem[subsystem] ?? 0;
     const delta = (positive > 0 ? positive : 0) - (negative > 0 ? Math.abs(negative) : 0);
     this.sBySubsystem[subsystem] = sub + delta;
@@ -1270,6 +1271,7 @@ export class WeiwenLawEngine {
   //   bugKey   ：稳定 BUG 身份（bugKeyOf），同一 BUG 拒不修复、反复硬闯共享同一计数
   // 任一线达封顶 mHumanCap → human=true，AI 停止纠结、转人工决策，不耗算力。
   _markIntercept(call, bugKey) {
+    this._interceptMarked = true;   // [2026-09-24] 出口统一落点：本次裁决已落追责痕迹（幂等依据）
     const systemKey = call?.systemId || call?.name || '_unknown';
     const sysCount = (this.mSystemMarks.get(systemKey) || 0) + 1;
     this.mSystemMarks.set(systemKey, sysCount);
@@ -1426,7 +1428,8 @@ export class WeiwenLawEngine {
   // 外 H 推演在 _decideCore 内完成；出口统一挂载内 H parked 状态（内 H 挂号协议 ④：同时交付）。
   decideToolCall(call, utterance) {
     this.conduction = [];                       // 本次裁决的链落点（每次重建，不跨调用累积）
-    const res = this._decideCore(call, utterance);
+    const core = this._decideCore(call, utterance);
+    const res = this._settleExit(core, call);   // ═══ 出口统一终局落点 ═══（结构保证，不依赖各分支各自记得）
     // ═══ ⑤ M 格：稳态结果 ═══（**每个出口都必须在 M 有落点** —— 此前出口只回 {kind,law,reason}，
     //   稳态结果被截断：外部看不到"这一裁决把 S 推到了哪"，故只能二次补算。此处以 S 格基线为起算点补齐。）
     const sStep = this.conduction.find((c) => c.v === 'S');
@@ -1441,6 +1444,43 @@ export class WeiwenLawEngine {
     });
     res.conduction = this._conductionSnapshot(); // 统一挂链落点（按 R→S→D→H→M 输出）
     return this._attachInnerH(res, call);
+  }
+
+  // ---------- 出口统一终局落点（2026-09-24 · 偏差修正 · 结构修法，不枚举分支） ----------
+  // 一次裁决 = 一个 M 果 ⇒ 出口必须保证两类痕迹都在场（缺一即"格还在、内容没了"）：
+  //   ① 追责痕迹（非 allow）：同一问题/同一系统反复出现须**可累积** —— 这是既有"达封顶 mHumanCap
+  //      转人工（免耗算力）"机制的前提。漏记不等于"更谨慎"，等于**让人被无限打扰而系统毫无记忆**。
+  //   ② 稳态刻痕（每次传导）：S 是 R 的落点 ⇒ 每一次传导都该在账本留一条痕。
+  //      deny/review 记 sign='0' —— **中性刻痕：只留痕，不冒充增益**，不改 sBySubsystem 读数。
+  // 为何放在出口而非各分支：分支是"枚举"（漏一个就断一处，实测已漏 10 处）；出口是"结构"（一处理，全出口覆盖）。
+  //   分支内已记过的，靠 _interceptMarked / _settleMarked 幂等跳过 —— 故本方法对既有路径零影响。
+  _settleExit(res, call) {
+    let out = res;
+    // ① 追责痕迹（非 allow 且该分支未记过）
+    if (out.kind !== 'allow' && !this._interceptMarked) {
+      const bk = bugKeyOf(call);
+      const mk = this._markIntercept(call, bk);
+      out = { ...out, mMark: out.mMark ?? mk, bugKey: out.bugKey ?? bk };
+      if (mk.human) {
+        // 达封顶：与既有各分支同构的转人工（不新增判据，只把"反复出现"这条既有线接全）
+        out = this._toHuman({
+          law: out.law, bugKey: bk, closedLoop: !!out.closedLoop, systemKey: mk.systemKey,
+          reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次 / 同一 BUG 被标记 ${mk.bugCount} 次，达封顶 ${mk.cap}：AI 停止纠结，转人工决策（含此前无痕的早退路径）`,
+        });
+      }
+    }
+    // ② 稳态刻痕（本次传导未记过）
+    if (!this._settleMarked) {
+      const ok = out.kind === 'allow';
+      this.recordSteady({
+        positive: ok ? 1 : 0,
+        subsystem: 'core',
+        detail: ok ? null : `截断:${out.kind}/${out.law ?? '-'}`,
+        action: extractShell(call) || extractPath(call) || (call?.name ?? null),
+        attrib: out.attrib ?? null,
+      });
+    }
+    return out;
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -1528,6 +1568,16 @@ export class WeiwenLawEngine {
   }
 
   _decideCore(call, utterance) {
+    // [2026-09-24 · 出口统一终局落点 · 本次裁决标志复位]
+    //   病灶（probe-dev-audit 实测）：同一件事（给出终局判词）在七类出口留下**七种不同痕迹**——
+    //     · scar / 作用域不可判 的 review ⇒ **完全无痕**（反复 10 次零记忆、零升级、永不达封顶转人工）
+    //     · 推演 deny ⇒ 只记追责（mBugForce），不落坐标点
+    //     · allow 两出口 ⇒「法无禁止」不记账、「推演」记账（而 recordSteady 注释自称"每个 D 就该 +1"）
+    //     · 反复硬闯转 `deny/D` 早退后 ⇒ 不再经过推演段标记，bugForce 冻结在阈值前，永不达封顶
+    //   根因：落点由**各分支各自记得**，而非由**出口统一保证** ⇒ 任一分支漏记，循环就在那里断
+    //     （同构于"链序＝定义依赖序"：格还在（判词有了），内容没了（落点没落））。
+    this._interceptMarked = false;   // 追责痕迹是否已落（_markIntercept 置）
+    this._settleMarked = false;      // 稳态刻痕是否已落（recordSteady 置）
     // —— 闭环闸门：未修复的故障环节禁止重入（阻断无限递归）——
     const re = this.bugStop.canReenter(call);
     if (!re.allowed) {
