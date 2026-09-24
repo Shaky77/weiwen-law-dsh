@@ -336,7 +336,13 @@ const DESTRUCTIVE = /\b(rm|rmdir|shred|unlink|mkfs|mkfs\.\w+|format|dd|truncate|
 //   而此处一直留着自带的 DESTRUCTIVE 工具名正则 ⇒ 与字典读法分裂（安 09-23 诊断的「三张表各说各话」）。
 //   commandLayer 现已＝「工具名封闭集 ∪ 字典词素」，故此处改为直接问它：
 //   同义写法（remove_tree / rm_rf / --remove-files）与 `rm -rf /` 走**同一条**判据、得**同一个**判词。
-const segDestructive = (s) => DESTRUCTIVE.test(s) || commandLayer(s) === 'exec-destructive';
+// 🔴 [2026-09-24 · 逻辑链断点修复] 上段注释早已写明「本处只消费剥离结果」，**实现却仍在自兜底**
+//   （`DESTRUCTIVE.test(s) || …`）—— 注释与实现分裂，即"格还在、内容没了"的又一处投影：
+//   旁路（自扫正则）与主链（commandLayer）**两个源**，故 `echo "rm -rf /"` 走旁路命中而主链判 exec
+//   ⇒ 同案两源不一致（数据位缺口，实测 deny 误伤 `echo "rm -rf /"` / `grep -r "rm -rf" /var/log/`）。
+//   修法＝**把旁路接回主链**：删去自兜底正则，只消费 commandLayer（数据边界与宾语位修正同源生效）。
+//   R 锚通道① 的作用域分量（SCOPE_ROOT / SYS_DELETE / PSEUDO_FS）不变，仍是独立源。
+const segDestructive = (s) => commandLayer(s) === 'exec-destructive';
 
 // [2026-09-23 · 字典即S · 权限位读法归位] 判据读**效果端点**，不读具体权限值（安 09-23「多音字」）：
 //   全锁 ∅（毁**可用性**）与 全开 ALL（毁**完整性**）是同一属性的两个方向，属同一个
@@ -930,6 +936,8 @@ export class WeiwenLawEngine {
     this.anchorPool = { paths: new Set(), nouns: new Set() };
     // 锚源自报（白箱可观）：实机可查"结构入口有没有接通 / 池里有什么"，把"猜字段名"换成"看事实"。
     this.anchorChannel = { utteranceSeen: false, principalAnchorSeen: false, lastPrincipalAnchor: null, poolPaths: [], poolNouns: [] };
+    // [2026-09-24 · 按链修补] 本次裁决的传导链落点（R→S→D→H→M）；每次 decideToolCall 重建。
+    this.conduction = [];
   }
 
   // ---------- S 稳态储备：双重属性（时间刻痕不可逆 + 当前值可升降） ----------
@@ -1417,8 +1425,106 @@ export class WeiwenLawEngine {
   // ---------- 工具调用前总裁决（对应 DSH tools/pre-execute） ----------
   // 外 H 推演在 _decideCore 内完成；出口统一挂载内 H parked 状态（内 H 挂号协议 ④：同时交付）。
   decideToolCall(call, utterance) {
+    this.conduction = [];                       // 本次裁决的链落点（每次重建，不跨调用累积）
     const res = this._decideCore(call, utterance);
+    // ═══ ⑤ M 格：稳态结果 ═══（**每个出口都必须在 M 有落点** —— 此前出口只回 {kind,law,reason}，
+    //   稳态结果被截断：外部看不到"这一裁决把 S 推到了哪"，故只能二次补算。此处以 S 格基线为起算点补齐。）
+    const sStep = this.conduction.find((c) => c.v === 'S');
+    const sBefore = sStep ? sStep.sBefore : null;
+    const sAfter = this.effectiveS();
+    this._mark('M', {
+      step: '稳态结果（S 基线 + 本次传导后的新稳态）',
+      verdict: res.kind, law: res.law ?? null, risk: res.risk ?? null,
+      sBefore, sAfter,
+      delta: typeof sBefore === 'number' ? sAfter - sBefore : null,
+      note: `${res.kind} / ${res.law ?? '-'}：${res.reason ?? ''}`,
+    });
+    res.conduction = this._conductionSnapshot(); // 统一挂链落点（按 R→S→D→H→M 输出）
     return this._attachInnerH(res, call);
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // [2026-09-24 · 按链修补：闸门串 → 传导链] 落点登记
+  // ────────────────────────────────────────────────────────────────────
+  // 定义依赖序（law.mjs CONDUCTION_CHAIN，注释「不可跳跃、不可逆序」）：
+  //   R 划定边界 → S 是已有稳态容量基线 → D 是进入基线的扰动 → H 是杠杆选择 → M 是稳态结果。
+  // 此前实现的三个偏离（实测取证，非推测）：
+  //   ① **S 格完全空缺**：链上无任何"已有稳态容量基线"被建立；
+  //   ② **D 格退化**：只剩两个形态 —— checkBreakWindow 的**累积计数器**（历史量，非本次扰动）
+  //      与 simulateBranch('D-1') 的**风险分级**（绝对判据，不参照任何基线）；
+  //   ③ **M 格截断**：出口只回 {kind, law, reason}，**不返回 S 的变化量**（稳态结果被丢弃，外部需二次补算）。
+  // ⇒ 统一症状＝"格还在，产物里找不到它自己定义要求的东西"（链断 ⇒ 结构坍塌，可观测）。
+  // 修法＝按定义依赖序逐格产出**落点**，下游消费上游产物（D 消费 R 的归因层与 S 的基线）。
+  //   ⚠️ 本批只补**链的形状与内容**：不新增词表、不新增阈值、不改判据强度（判词不因落点登记而翻转）。
+  // ════════════════════════════════════════════════════════════════════
+  _mark(v, payload = {}) {
+    this.conduction.push({ v, ...payload });
+    return payload;
+  }
+
+  /** 链落点快照：按链序输出（同格内保持登记序）。
+   *  第一断点显式标出：链上任一格给出终局判定（cuts）即终止传导 —— 断点之后全塌，查后面无意义。
+   *    ⇒ 后续格标 terminatedBy（"结构在此坍塌"），不标 null —— 否则"缺格"会被误读成"没跑到"。
+   *  ⚠️ [用户 2026-09-24 定] 链**不能拆着查**：正确动作＝按依赖方向单线走，找第一个断点。 */
+  _conductionSnapshot() {
+    const ORDER = ['R', 'S', 'D', 'H', 'M'];
+    let cut = null;
+    for (const c of this.conduction) {
+      if (cut) break;
+      if (c.cuts) cut = c.v;
+    }
+    return ORDER.map((v, i) => {
+      const cutIdx = cut ? ORDER.indexOf(cut) : -1;
+      const steps = this.conduction.filter((c) => c.v === v).map(({ v: _v, ...rest }) => rest);
+      // ⚠️ M 是**汇合点**：无论链在哪一格断，稳态结果都必然存在（deny 也是一种结果）⇒ M 有落点即不标终止。
+      const after = cutIdx >= 0 && i > cutIdx && steps.length === 0;
+      return {
+        v, steps,
+        ...(after ? { terminatedBy: cut, terminatedNote: `链在 ${cut} 格给出终局判定 ⇒ 传导终止（断点之后全塌，后续格不参与）` } : {}),
+      };
+    });
+  }
+
+  // ---------- ② S 格：已有稳态容量基线 ----------
+  // 定义：S 是**已有稳态容量基线** —— 先有基线，"扰动"才有参照物（链序＝定义依赖序）。
+  // 本格只**读**基线（不写、不结算）：稳态容量（木桶最短）+ 当前有效作用面（已声明范围）+
+  //   已有刻痕（账本/窗口）+ 会话登记（写入/敏感读取）+ 是否已处破窗态。
+  // 之后 D 格的"是否进入基线"以此为准；M 格以 sBefore 为起算点给出稳态变化量。
+  _establishBaseline() {
+    return {
+      sBefore: this.effectiveS(),
+      bySubsystem: { ...this.sBySubsystem },
+      windowBroken: this.windowBroken,
+      failureStreak: this.failureStreak,
+      mLoadByLayer: Object.fromEntries(this.mLayerLoad),
+      declaredPaths: [...this.anchorPool.paths],
+      declaredNouns: [...this.anchorPool.nouns],
+      scars: this.sAccount.size(),
+      windowMarks: this.windowMarks.size,
+      sessWritten: this.sessWritten.size,
+      sessRead: this.sessRead.size,
+    };
+  }
+
+  // ---------- ③ D 格：进入基线的扰动 ----------
+  // 定义：D 是**进入基线的扰动** —— 必须相对 S 格基线算，且由 R 格的归因层喂入（下游消费上游）。
+  // 本格给三态，**不给定论不等于放行**（判不出就交下游，不猜）：
+  //   entered=false：R 格归因层为**读取类** ⇒ 读取不改变基线 ⇒ 扰动恒为 0（结构判断，非风险推断）
+  //   entered=true ：R 格归因层为**不可逆破坏类** ⇒ 已进入基线，扰动取 R 层不可逆级（量级由 R 域层级给，不新拍阈值）
+  //   entered=null ：R 格为**容器类（exec）或未定** ⇒ 实质动作未被剥出 ⇒ 扰动**不可判** ⇒ 交 H 格推演
+  // ⚠️ 读数与基线合并：若基线已处破窗态，则"本次扰动"叠加在既有累积之上（D 的历史量在此汇合）。
+  _baselineIntrusion(attrib, base) {
+    const layer = attrib?.layer ?? null;
+    if (layer === 'cred-read') {
+      return { entered: false, magnitude: 0, layer,
+        note: 'R 格归因层为读取类：读取不改变基线 ⇒ 未进入基线（D 扰动 = 0）' };
+    }
+    if (layer && (DELETION_LAYERS.has(layer) || layer === 'exec-destructive')) {
+      return { entered: true, magnitude: 'scar', layer,
+        note: 'R 格归因层为不可逆破坏类：已进入基线（D 扰动 = 不可逆级，量级取 R 域层级）' };
+    }
+    return { entered: null, magnitude: null, layer,
+      note: `R 格归因层为${layer === 'exec' ? '容器类（exec：只说明是执行器，不说明执行了什么）' : layer ? `「${layer}」` : '未定'} ⇒ 实质动作未被剥出，D 扰动不可判 ⇒ 交 H 格推演，不在此处拍` };
   }
 
   _decideCore(call, utterance) {
@@ -1468,6 +1574,13 @@ export class WeiwenLawEngine {
     };
 
     const r = this.checkRigidAnchor(call);
+    this._mark('R', {
+      step: '划定边界 · 刚性锚（客观规则是否被触及）',
+      hit: r ? r.anchor : null,
+      magnitude: r ? r.magnitude : null,
+      cuts: !!r,
+      note: r ? `触及刚性锚「${r.anchor}」（R 域 L${r.magnitude}，L 越小越根本）` : '未触及任何刚性锚',
+    });
     if (r) {
       // [2026-09-19 M 位移序列 · 同构回填] 破窗读数 = M 位移在该 R 层的投影累积：
       //   同层重复才累积该层；跨层移动＝上溯，新层按其自身 authority 从头累积（旧层读数保留）。
@@ -1486,13 +1599,50 @@ export class WeiwenLawEngine {
     // REVIEW 档（2026-08-29）：破坏性作用域不可判 → 交还人类，不猜。
     // 第三档既非放行也非拦截，把不确定性原样交还人类——"不替人做选择"。
     const u = this.checkUnclearScope(call);
+    this._mark('R', {
+      step: '划定边界 · 作用域可判性',
+      verdict: u ? (u.deny ? 'deny' : 'review') : null,
+      cuts: !!u,
+      note: u ? u.reason : '作用域可静态判定（无变量/命令替换/相对全量）',
+    });
     if (u) {
       if (u.deny) { this.failureStreak += 1; return { kind: 'deny', law: 'R', reason: u.reason }; }
       return { kind: 'review', law: 'R', reason: u.reason };
     }
+    // ═══ ② S 格：已有稳态容量基线 ═══（R 已划完边界 ⇒ 此处建立基线；D 以它作参照）
+    const base = this._establishBaseline();
+    this._mark('S', {
+      step: '已有稳态容量基线（先有基线，才谈得上扰动）',
+      sBefore: base.sBefore,
+      windowBroken: base.windowBroken,
+      declaredPaths: base.declaredPaths.length, declaredNouns: base.declaredNouns.length,
+      scars: base.scars, sessWritten: base.sessWritten, sessRead: base.sessRead,
+      note: `基线读数：稳态容量 S=${base.sBefore}｜有效作用面：已声明路径 ${base.declaredPaths.length} 项 / 类别 ${base.declaredNouns.length} 项｜已有刻痕 ${base.scars} 条`,
+    });
     const d = this.checkBreakWindow();
+    this._mark('D', {
+      step: '进入基线的扰动 · 累积窗口（历史量）',
+      hit: !!d,
+      cuts: !!d,
+      windowBroken: base.windowBroken,
+      failureStreak: base.failureStreak,
+      note: d ? d.reason : '累积未达破窗阈值（本次裁决按当前扰动单算）',
+    });
+    this._mark('D', {
+      step: '进入基线的扰动 · 本次扰动（相对 S 基线）',
+      // ⚠️ 此处 attrib 尚未产出（R 的归因分量在下方按判据强度序后置）⇒ 本次先落"待 R 归因层"标记，
+      //    R 归因产出后回填（见下方 attrib 落点后的 _backfillIntrusion）。
+      pending: true,
+      note: '本次扰动须由 R 格归因层喂入（下游消费上游）；R 归因产出后回填',
+    });
     if (d) return { kind: 'deny', law: 'D', reason: d.reason };
     const h = this.checkInnerH(call);
+    this._mark('H', {
+      step: '杠杆选择 · 边界检查（内 H 不可侵 / 外 H 可审计）',
+      verdict: h ? (h.kind ?? 'deny') : null,
+      cuts: !!h,
+      note: h ? h.reason : '未触及内 H 边界（向外 H 审计或无主体性改写信号）',
+    });
     if (h) {
       // H 第三档：有疑无据 → review（交还人类），不 deny 也不 allow
       if (h.kind === 'review') return { kind: 'review', law: 'H', reason: h.reason };
@@ -1505,6 +1655,13 @@ export class WeiwenLawEngine {
     const mA = this.checkExplicitFlags(call);    // 治标
     const mB = this.checkSchemaInference(call);  // 治本（独立）
     const mCourt = this.crossCheckM(mA, mB);
+    this._mark('M', {
+      step: '稳态结果 · 第一 Bug 停机（双线并行 + 法院式交叉复核）',
+      verdict: mCourt.verdict,
+      cuts: mCourt.verdict !== 'pass' && mCourt.verdict !== 'allow',
+      crossCheck: { 治标: mA ? 'halt' : 'pass', 治本: mB?.halt ? 'halt' : 'pass' },
+      note: mCourt.reason ?? (mCourt.verdict === 'pass' ? '双线均 pass（未检出第一 Bug）' : ''),
+    });
     if (mCourt.verdict === 'halt') {
       // 双线一致确认停机：切断该环节（铁律②·以断保续），登记进入闭环 + 标记
       const halt = this.bugStop.halt(call);
@@ -1531,6 +1688,11 @@ export class WeiwenLawEngine {
     }
     // 分形微观：读取公开系统信息文件属"法无禁止即可为"，直接放行，不落入推演灰区
     const benign = this.checkBenignRead(call);
+    this._mark('M', {
+      step: '稳态结果 · 法无禁止即可为（读取公开系统信息，落入 M 的显式放行档）',
+      hit: !!benign, verdict: benign ? 'allow' : null,
+      note: benign ? benign.reason : '非公开系统信息读取（本档不适用）',
+    });
     if (benign) return { kind: 'allow', law: '法无禁止', reason: benign.reason };
     // —— 路径1 归因锚点（分形子项 m 果，非整体 M 果）——
     // 边界铁律（用户定·防逻辑打架）：attrib 是「子项内部跑完一轮 RSDHM 的分形微型
@@ -1545,6 +1707,18 @@ export class WeiwenLawEngine {
     // 例：deploy_keylogger{config:{target:HOST}} 威胁藏在工具实现里、参数侧抽不到，
     // 此前 allow 放行（盲区），现已收口为 review。
     const attrib = attributeCall(call);
+    this._mark('R', {
+      step: '划定边界 · 动作归因（分形子项 m 果）',
+      ok: attrib.ok, layer: attrib.layer, method: attrib.method,
+      cuts: !attrib.ok,
+      note: attrib.ok
+        ? `动作归入类别层「${attrib.layer}」（抽法：${attrib.method}）`
+        : '归不出动作类别（名中性或无可观测行为）⇒ 边界无法划定 ⇒ 链在此断',
+    });
+    // ═══ ③ D 格回填：本次扰动（消费 R 格归因层 + S 格基线）═══
+    const intr = this._baselineIntrusion(attrib, base);
+    const pend = this.conduction.findIndex((c) => c.v === 'D' && c.pending);
+    if (pend >= 0) this.conduction[pend] = { v: 'D', step: '进入基线的扰动 · 本次扰动（相对 S 基线）', ...intr };
     if (!attrib.ok) {
       // 分形子项 m 果 = 归不出：动作类别不可判 → 铁律「判不出来就 review，不猜」。
       // 挂 attrib + fractalSubM:true 标注此为「分形子项级」触发，非整体推演结论。
@@ -1560,7 +1734,13 @@ export class WeiwenLawEngine {
     // 接 destructiveTargetMissing（L682）：仅标记「破坏性动作 + 目标缺失」，命中即交还人工。
     // 此闸门须位于 attrib.ok 之后——attrib 归不出（中性名）已由上方 review 接管，
     // 此处只接管「类别可判、但缺具体作用对象（物证不具在）」这一类，避免误伤非破坏性 exec。
-    if (destructiveTargetMissing(call, attrib)) {
+    const dtm = destructiveTargetMissing(call, attrib);
+    this._mark('R', {
+      step: '划定边界 · 物证具在（破坏性动作是否给出具体作用对象）',
+      hit: dtm, cuts: dtm,
+      note: dtm ? `${attrib.layer} 层动作缺具体作用对象 ⇒ 证据不足 ⇒ 链在此断` : '作用对象已外化（或非破坏性动作，本判据不介入）',
+    });
+    if (dtm) {
       return {
         kind: 'review',
         law: 'R',
@@ -1572,6 +1752,12 @@ export class WeiwenLawEngine {
     // [2026-09-20 · 知行合一轴 · 2026-09-24 同构回填] 人证与物证齐备 ⇒ **先比对，再谈推演**。
     // 推演是**证据不足时**的推测；此处言/行冲突已是**可观测事实（外 H）**，故不应再落入灰区推演。
     const sa = this.checkSpeechAct(call, attrib, utterance);
+    this._mark('H', {
+      step: '杠杆选择 · 知行合一（言/行两集合是否重合）',
+      verdict: sa ? sa.kind : null,
+      cuts: !!sa,
+      note: sa ? sa.reason : '言侧未启用或无冲突（无承诺可比 / 言行重合）',
+    });
     if (sa) {
       if (sa.kind === 'deny') this.failureStreak += 1;  // 破坏类分裂计入破窗（与 R 命中、推演 deny 同权）
       return sa;
@@ -1590,6 +1776,15 @@ export class WeiwenLawEngine {
     //     （措辞按此校正，免得把**边界**说成**缺陷**）。坐标图**内**才是唯稳律的工程场：
     //     场外的东西只负责交回，不负责补造（⇒ 不在图内凭空补一个"在飞态"字段去装图外的答案）。
     const scar = scarUnanchored(call, attrib, this.anchorPool);
+    this._mark('R', {
+      step: '划定边界 · 痕锚归属（不可逆动作的归属是否可在未来被验证）',
+      hit: !!scar,
+      cuts: !!scar,
+      targets: scar ? scar.targets : null,
+      note: scar
+        ? `不可逆动作归属失败（目标=${scar.targets.length ? scar.targets.join(' ') : '未给出'}）⇒ 未来无法验证其归属`
+        : '非不可逆类，或归属得上已声明范围（本判据不介入）',
+    });
     if (scar) {
       return {
         kind: 'review',
@@ -1608,6 +1803,16 @@ export class WeiwenLawEngine {
     // 修复方式仅为回显：三处裁决出口一律挂载 projection = risk.branches（不改判据、不改阈值、不改裁决逻辑）。
     // allow 出口原本连 reason 都未回显，一并按 risk.reason 带出（非新增结论，只是不丢弃已算出的结论）。
     const risk = this.deduceRisk(call);
+    // ═══ ④ H 格：杠杆选择（推演层两分支并行模拟后择一）═══
+    // 手稿微观链：H₀ 处正式分叉 —— H₀→S₀(S₀+1) 增路径 / H₀→D₀(D₀+1) 蚀路径；
+    //   两路**同时跑**（并行模拟，非二选一）、都汇入 M，终态 S 再对比区分。此处把"选择"显式落点。
+    this._mark('H', {
+      step: '杠杆选择 · 推演分叉（S 增路径 / D 蚀路径 并行模拟后对比）',
+      lever: risk.verdict === 'allow' ? 'S+' : risk.verdict === 'deny' ? 'D-' : 'S+∧D-（不可判 ⇒ 交人）',
+      branches: risk.branches ? { bS: risk.branches.bS, bD: risk.branches.bD } : null,
+      verdict: risk.verdict,
+      note: risk.reason,
+    });
     // 两路分支都汇入 M（独立事件沉淀），无论裁决结果先记 M
     this.recordDeduction(risk.m);
     if (risk.verdict === 'deny') {

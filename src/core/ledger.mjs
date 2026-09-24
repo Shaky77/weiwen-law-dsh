@@ -39,9 +39,12 @@ export function classifyReversibility(action = '') {
 }
 
 // R 域标签（经 domainOf，短名 Cosmic/Earth/Macro/Micro）：支持单/多域 D（多域交叉、一词跨域同用）。
+// [2026-09-24 · 对齐既有判据，非新增规则] `layer == null` 不再返空 —— 经 domainOf(null) 落最外层 Cosmic
+//   （"它在宇宙之内，只是层级未定"）。理由＝attribution.mjs 已定判据「域是全集覆盖的 ⇒ 不存在"无域"」「空值消失
+//   ⇒ 堵掉空值被当成不可比 ⇒ fail-open 的洞（空 ≠ 不可比）」；原 `return []` 与之一处不一致。
+//   🔴 兜底由**公理**给（宇宙容纳一切 ⇒ 补集非空），不是靠补名单；这是「表只做细化、公理负责全集」的落地。
 export function rDomainsForLayer(layer) {
-  if (layer == null) return [];
-  const layers = Array.isArray(layer) ? layer : [layer];
+  const layers = layer == null ? [null] : (Array.isArray(layer) ? layer : [layer]);
   const out = [];
   for (const lv of layers) {
     const d = domainOf(lv);

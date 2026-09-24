@@ -379,10 +379,24 @@ function commandLayer(cmd) {
   //   这一条覆盖**未来任何 `-xxx` 参数**，不是逐个选项打补丁——先结构、后枚举。
   //   注：`--delete` / `--remove-files` 等**删除标记本身就是参数**，故其检测走下方字典线（状语位），不受此约束。
   const CMD_POS = '(?<![-\\w])';
-  const DESTRUCTIVE_NAME = new RegExp(CMD_POS + '(rm|rmdir|shred|unlink|mkfs|format|dd|truncate|wipefs)\\b', 'i');
+  // [2026-09-24 · 语法槽位·宾语位 ≠ 谓语位] 破坏名必须出现在**动词位（谓语）或修饰器位**，
+  //   **不得**出现在宾语位。旧实现扫全段子串 ⇒ 宾语位命中即判破坏。
+  //   病灶（准确率外部集实测，危险词当宾语 0/2）：`ls /bin/rm`、`cp /bin/rm /tmp/x` 被判
+  //     exec-destructive —— 归因层误报"这是删除动作"（实际动作是列目录/复制）⇒ 下游 scar 判 review。
+  //   根因与数据位同族：**锚在词形（路径里出现 rm 这个词），不在后果（是否真的删）**。
+  //   结构判据（不列修饰器白名单、不枚举工具名，只读语法槽位）：
+  //     ① 谓语位：段首 token 的**末段**（`/bin/rm -rf /` ⇒ rm 在谓语 ⇒ 破坏；`echo` / `ls` ⇒ 非破坏）
+  //     ② 修饰器位：段内**原样**等于破坏名的 token（`sudo rm` / `xargs rm` / `docker rm`）
+  //     ③ 宾语位：`/bin/rm` 这类**带路径分隔符**的 token 原样 ≠ 破坏名 ⇒ 不算（宾语不是命令）
+  //   注（旧注释保留其效力）：命令词前面不得是 `-`（参数位不是命令位）—— 已由 ①② 的"原样整词匹配"覆盖。
+  const DESTRUCTIVE_WORD = /^(?:rm|rmdir|shred|unlink|mkfs(?:\.\w+)?|format|dd|truncate|wipefs)$/i;
   for (const seg of String(cmd).split(SEG_SPLIT)) {
     const head = seg.trim().split(CMD_TOKEN_SPLIT).filter(Boolean)[0] ?? '';
-    if (DESTRUCTIVE_NAME.test(INTERPRETER_HEAD.test(head) ? seg : stripData(seg))) return 'exec-destructive';
+    // 解释器段：引号内是**代码**不是数据 ⇒ 用原文（否则 `bash -c "rm -rf /"` 会塌方）
+    const toks = (INTERPRETER_HEAD.test(head) ? String(seg) : stripData(seg)).split(CMD_TOKEN_SPLIT).filter(Boolean);
+    if (!toks.length) continue;
+    if (DESTRUCTIVE_WORD.test(String(toks[0]).split('/').pop() ?? '')) return 'exec-destructive';  // ① 谓语位
+    if (toks.some((t) => DESTRUCTIVE_WORD.test(t))) return 'exec-destructive';                     // ② 修饰器位
   }
   // [2026-09-20 · 破坏标记，有限封闭集] 只登记**删除语义的形态**，不登记"哪些命令是只读的"
   //   ——结构理由：**破坏标记有限可枚举，只读命令无限开放**（详见 engine.checkSpeechAct 留档注释）。
