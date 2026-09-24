@@ -66,11 +66,15 @@ test('R：凭据外传被拒', () => {
   assert.equal(d.law, 'R');
 });
 
-test('R：正常命令放行并累积 S', () => {
+test('R：正常命令放行并留中性刻痕（放行 ≠ 增益）', () => {
   const e = new WeiwenLawEngine();
   const d = e.decideToolCall({ name: 'bash', args: { command: 'ls -la' } });
   assert.equal(d.kind, 'allow');
-  assert.equal(e.effectiveS(), 1);
+  // [2026-09-24 口径修复] 修前此处断言 effectiveS()===1 —— 把"放行"当"稳态增益"，即"同一记录内
+  //   sign（评价）与 reversible（事实）可互相矛盾"那个失真本身。放行只说明"判据未命中"，
+  //   不构成增益依据 ⇒ 记中性刻痕 '0'，储备读数不因放行增长（账本仍每笔都记、只增不减）。
+  assert.equal(e.effectiveS(), 0, '放行不推高稳态储备');
+  assert.equal(e.sAccount.sSeq().at(-1).sign, '0', '放行留中性刻痕：只留痕，不冒充增益');
 });
 
 // ---------------- D 破窗止损 ----------------
@@ -133,13 +137,18 @@ test('M：不可恢复逻辑悖论被拒（以断保续 · 双线确认停机）
 });
 
 // ---------------- 综合：放行后 S 累积 ----------------
-test('综合：多次放行后 S 单调增长', () => {
+test('综合：多次放行留痕但不推高储备（账本只增，刻痕如实标注）', () => {
   const e = new WeiwenLawEngine();
   for (let i = 0; i < 5; i++) {
     const d = e.decideToolCall({ name: 'bash', args: { command: 'echo ok' } });
     assert.equal(d.kind, 'allow');
   }
-  assert.equal(e.effectiveS(), 5);
+  // [2026-09-24 口径修复] 修前断言 effectiveS()===5 —— 账本声称"储备"、实为"放行计数"（实测：
+  //   只读 ×12 ⇒ 储备 0→12）。修后：账本仍**只增不减**（5 条刻痕都在），sign 只表达有依据的稳态方向。
+  //   `echo ok` 的可逆性不可判 ⇒ 如实记 'unknown'（明示"不知"），**不默认增益**。
+  assert.equal(e.sAccount.size(), 5, '账本只增不减：5 次放行 ⇒ 5 条刻痕');
+  assert.equal(e.effectiveS(), 0, '储备不被放行次数推高');
+  assert.deepEqual([...new Set(e.sAccount.sSeq().map((r) => r.sign))], ['unknown'], '刻痕如实标注"不可判"，不冒充增益');
 });
 
 // ---------------- S 时间周期模型：同类事件聚合（防上下文过载，作者 2026-08-19） ----------------

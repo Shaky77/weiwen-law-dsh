@@ -364,16 +364,19 @@ function apply(ctx) {
       // 对外语义固定为 deny：宿主契约只认 deny / next()，返回 'review' 有被当未知类型放行的风险。
       // 「宁可先拦截，不可直接放」⇒ 用宿主听得懂的话说"拦住"，用附加字段说"这是挂起不是终局"。
       const isReview = decision.kind === 'review';
-      const out = {
-        kind: 'deny',
-        law: decision.law,
-        reason: `[唯稳律·${decision.law}] ${decision.reason}`,
-        ...(decision.bugKey !== undefined ? { bugKey: decision.bugKey } : {}),
-        ...(decision.closedLoop !== undefined ? { closedLoop: decision.closedLoop } : {}),
-        ...(Array.isArray(decision.missing) ? { missing: decision.missing } : {}),
-        ...(decision.stage !== undefined ? { stage: decision.stage } : {}),
-        ...(decision.risk ? { risk: decision.risk } : {}),
-      };
+      // ═══ 白箱贯彻：事实位默认放行（2026-09-24 · 结构修法，不按名挑选）═══
+      // 修前此处是「按名挑选」：只列 bugKey/closedLoop/missing/stage/risk 五个名 ⇒ 引擎产出的**其余事实位全部被静默丢弃**。
+      // 实测取证（probe-whitebox-egress.mjs `before`，24 条真 API 输入 / 22 条裁决）：
+      //   mMark 丢 22/22 · conduction 丢 22/22 · innerH 丢 22/22 · attrib 18 · deduced 12 · scarUnanchored 11 · fractalSubM 7 · mCrossCheck 1。
+      //   `innerH` 被丢尤其直接违反引擎侧内 H 协议④：「外 H 推演结果与内 H parked 状态**同时交付**」。
+      // 为何改结构而非补名字：字段随引擎演化 ⇒ **枚举永远追不上**（X 轴）；放行必须按「位」（Y 轴），一次覆盖现在与将来的全部事实位。
+      // 宿主契约读自源码（dsh-tools/lib/index.js:3002 只读 kind/reason；lib/types/index.d.ts:408 类型仅 {kind,reason}）
+      //   ⇒ 附加字段被忽略、不做严格校验 ⇒ 对宿主无害；对下游插件与审计面即为白箱。
+      // 排除表按**性质**定义（仅「内部实现位」：引擎实例引用／可变内部状态／内 H 推演过程），不按名黑名单；
+      //   实测：22 条裁决的引擎产出**全部可 JSON 序列化、无循环、无函数**（样例 2456 B）⇒ 当前无一项落入排除。
+      const INTERNAL_ONLY = [];   // 仅内部实现位；事实位一律放行
+      const out = { ...decision, kind: 'deny', law: decision.law, reason: `[唯稳律·${decision.law}] ${decision.reason}` };
+      for (const k of INTERNAL_ONLY) delete out[k];
       if (isReview) {
         // ③ 搁置 + 标注留证：引擎某些 review 出口未挂 bugKey，此处补稳定 BUG 身份供追溯。
         //    不走 _markIntercept：避免污染 M 档 mBugForce 计数（会改变达封顶升级行为）。
@@ -389,9 +392,14 @@ function apply(ctx) {
         const summary = branchesSummary(branches);
         if (summary) out.reason = `${out.reason}\n${summary}`;
       }
-      logline(`pre-execute ${exec?.name} -> ${decision.kind}${isReview ? '(awaitingHuman, bugKey=' + out.bugKey + ')' : ''}`);
+      // ═══ 白箱贯彻：接口所见＝日志所记（同一对象，不分叉）═══
+      // 日志是 append-only 审计面（src/runtime.log，.gitignore 排除、不入库）。若此处另写一份"摘要"，
+      //   两份一旦漂移，白箱即退化为"看起来白箱" ⇒ 故记的就是**返回的那个对象本身**。
+      logline(`pre-execute ${exec?.name} -> ${decision.kind}${isReview ? '(awaitingHuman, bugKey=' + out.bugKey + ')' : ''} | whitebox ${JSON.stringify(out)}`);
       return out;
     }
+    // allow：同样留白箱记录 —— 否则"没被拦"成了**无痕事件**（与引擎侧"每次传导必留刻痕"同构）。
+    logline(`pre-execute ${exec?.name} -> whitebox ${JSON.stringify(decision)}`);
     return next();
   });
 
@@ -427,6 +435,12 @@ function apply(ctx) {
       } else {
         logline(`pre-step -> reject(${decision.law})`);
       }
+      // ═══ 白箱贯彻：与 tools/pre-execute 同构 ═══
+      // 宿主契约（PreStepDecision）只认 {kind:'reject'} ⇒ 富信息**无法随返回值出去**，日志即此处唯一白箱面。
+      // 修前此处只挑了 bugKey / branches 几个名字写日志 —— 同一个"按名挑选"的毛病：
+      //   引擎决定对象本身（law/reason）与**本次链落点**（engine.conduction）都没进审计面。
+      // 改为如实载入**引擎决定对象本身** + 适配层补项（同一"按位、不按名"原则）。
+      logline(`pre-step -> whitebox ${JSON.stringify({ ...decision, bugKey: bugKeyOf({ name: 'pre-step', args: { messages: payload?.messages } }), conduction: engine.conduction ?? [] })}`);
       return { kind: 'reject' };
     }
     return next();
@@ -487,6 +501,10 @@ function apply(ctx) {
       decision = null;   // fail-open
       logline(`post-execute gate failed open: ${e?.message ?? e}`);
     }
+    // ═══ 白箱贯彻：与前两处同构（记的就是返回的那个对象，不分叉）═══
+    // 回执侧终局（D 破窗止损落点）此前只留了一行摘要（streak/bugKey）⇒ 交还给宿主的 feedback 原文
+    //   （＝阻断所依据的证据）没有进审计面。改为整条记录入账，留痕与交付同源。
+    if (decision) logline(`post-execute ${exec?.name} -> whitebox ${JSON.stringify(decision)}`);
     return decision ?? (typeof next === 'function' ? next() : { kind: 'accept' });
   });
 
@@ -542,13 +560,20 @@ function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: 'query_conduction_chain',
-    description: '返回传导链顺序 R→S→D→H→M 与框架要义，供模型理解闭环结构。',
+    description: '返回传导链顺序 R→S→D→H→M 与框架要义，并回显**最近一次裁决的实际链落点**（每节读数与判词），供模型理解闭环结构并自查本次判定依据。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
       return {
         chain: ['R 刚性锚点', 'S 稳态储备', 'D 破窗止损', 'H 内H不可侵', 'M 第一Bug停机'],
         essence: '因果律运行结构的白箱呈现：保活（不抛弃任何节点）与精准（结构自带锚点）同构。',
+        // [2026-09-24 · 白箱贯彻] 修前本工具**返回常量**：无论发生过什么，读到的都是同一段文字
+        //   ⇒ 一个"看起来白箱"的查询面，实际是黑箱（外部无法据此复核任何一次裁决）。
+        //   而引擎侧本次裁决的链落点在 `engine.conduction` **一直是在场的**（decideToolCall 每次重建，
+        //   R→S→D→H→M 各节含 sBefore/sAfter/delta/verdict 等读数）⇒ 如实回显，不加工。
+        //   不新增判据、不改裁决、不挑选字段（同上：按位如实，不按名摘要）。
+        lastConduction: engine.conduction ?? [],
+        lastConductionNote: '最近一次 decideToolCall 的链落点（逐节读数）。空数组＝本次会话尚未发生裁决。',
       };
     },
   }));

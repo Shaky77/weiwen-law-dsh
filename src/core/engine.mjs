@@ -945,10 +945,27 @@ export class WeiwenLawEngine {
   //   - 当前值维度：positive（S 路径）S(S+1) 增强；negative（D 路径）|S(S-1)| 绝对侵蚀、当前值下降。
   //   - trauma 为历史刻痕记录（绝对值），不回退当前值。
   // 注意：真实路径为 M → H₀ 分流 → S₀(+1) 或 |S₀(S₀-1)|（见 law.mjs 的 FEEDBACK_LOOP）。
-  recordSteady({ positive = 0, negative = 0, trauma = 0, subsystem = 'core', topic = null, detail = null, action = null, attrib = null } = {}) {
+  recordSteady({ positive = 0, negative = 0, trauma = 0, subsystem = 'core', topic = null, detail = null, action = null, attrib = null, executed = false } = {}) {
     this._settleMarked = true;      // [2026-09-24] 出口统一落点：本次裁决已落稳态刻痕（幂等依据）
+    // ═══ [2026-09-24 · 如实记录（口径层修复）] sign 与 delta **同源**，且只由**可复验的事实**推得 ═══
+    //   修前口径：sign 由**出口分支**给定（`positive: ok ? 1 : 0` ⇒ 放行即 '+'）。那是**评价**，不是事实 ——
+    //   放行只说明"判据未命中"，不等于"稳态增益"；且它与**同一条记录里的事实字段 reversible 可以互相矛盾**
+    //   （实测：`psql -c "DROP TABLE users"` ×12 全 allow，刻痕 `+/scar` ×12 ⇒ 同一记录内"增益"与"不可逆"并存）。
+    //   修后口径（唯稳律＝因果律的分身 ⇒ 记账必须守真，记真伪不记对错）：
+    //     · 显式传入的 positive/negative ⇒ 有依据的稳态变化（闭环修复成功 / 创伤侵蚀），优先；
+    //     · executed ∧ scar（动作已执行且不可逆）⇒ '-'：事实是稳态被消耗 —— 疤不可逆是**既有的**可逆性
+    //       分类（classifyReversibility）的如实投影，不是新增判据、不是新增阈值；
+    //     · executed ∧ unknown（已执行但可逆性不可判）⇒ 'unknown'：**如实记"不知"，不默认记增益**；
+    //     · 其余（被拦 / 可逆 / 无影响）⇒ '0'：中性刻痕，只留痕、不冒充增益。
+    //   ⇒ delta 由 sign 推得（不再由调用方单独给），呈现面与记账面**不再两源**。
     const sub = this.sBySubsystem[subsystem] ?? 0;
-    const delta = (positive > 0 ? positive : 0) - (negative > 0 ? Math.abs(negative) : 0);
+    const rev0 = action ? classifyReversibility(action) : { reversible: 'unknown', overwrite: false };
+    let sign, delta;
+    if (positive > 0) { sign = '+'; delta = positive; }
+    else if (negative > 0) { sign = '-'; delta = -Math.abs(negative); }
+    else if (executed && rev0.reversible === 'scar') { sign = '-'; delta = -1; }
+    else if (executed && rev0.reversible === 'unknown') { sign = 'unknown'; delta = 0; }
+    else { sign = '0'; delta = 0; }
     this.sBySubsystem[subsystem] = sub + delta;
     // 原始刻痕（append-only 全量）：所有事件只沉淀不消解，供深度审计
     if (positive > 0) this.historyTrail.push({ type: 'S+1', subsystem, amount: positive, topic, detail });
@@ -964,16 +981,17 @@ export class WeiwenLawEngine {
     if (negative > 0) this._coalesce(`${base}::-1`, detail, '-', ts);
     if (trauma > 0) this._coalesce(`${base}::trauma`, detail, 'trauma', ts);
 
-    // [2026-09-20 ledger wiring · 附加记录 · 2026-09-24 同构回填] S 刻痕沉入 R 账本：term 字典序索引、R 域标签、可逆性标签。
-    // 仅附加记录，不改裁决逻辑、不碰禁区。attrib/action 为可选（onFailure 等调用点不传 ⇒ 标签留空/unknown）。
-    //   ⚠️ 记账口径：D 定域于 X=t ⇒ 必落 Y=R 某层 ⇒ **就该 +1**（不能挂在"锚命中"上，否则无锚即不入账 = 账本会漏）。
+    // [2026-09-20 ledger wiring · 附加记录 · 2026-09-24 同构回填 · 2026-09-24 口径修复]
+    //   S 刻痕沉入 R 账本：term 字典序索引、R 域标签、可逆性标签。
+    //   仅附加记录，不改裁决逻辑、不碰禁区。attrib/action 为可选（onFailure 等调用点不传 ⇒ 标签留空/unknown）。
+    //   ⚠️ 旧口径注释曾写「必落 Y=R 某层 ⇒ 就该 +1」——那是把**入账**（这笔确实记了）与**增益**（S 变好）当成同一件事，
+    //      sign 因此同时承担两个语义，账本会读出"不可逆动作在增益"这种自相矛盾的记录。
+    //      现口径：入账与否由记录本身在场即证（rStore 有一条），sign 只表达**有依据的稳态方向**。
     const term = topic ?? subsystem;
-    const sign = positive > 0 ? '+' : negative > 0 ? '-' : '0';
     const rDomains = rDomainsForLayer(attrib?.layer ?? attrib?.layers ?? null);
-    const rev = action ? classifyReversibility(action) : { reversible: 'unknown', overwrite: false };
     // [2026-09-20 · 洞③] action 一并沉入刻痕（原始动作 ⇒ 事后可溯）；可选，未传则留 null。
     //   只记 sign/term 而丢掉动作 ⇒ 事后读不出"当时做了什么"（实测 detail=null）。
-    this.sAccount.record({ term, sign, rDomains, reversible: rev.reversible, overwrite: rev.overwrite, action, detail, subsystem, t: ts });
+    this.sAccount.record({ term, sign, rDomains, reversible: rev0.reversible, overwrite: rev0.overwrite, action, detail, subsystem, t: ts });
     return this.snapshot();
   }
 
@@ -1298,8 +1316,20 @@ export class WeiwenLawEngine {
   }
 
   // 转人工决策：AI 停止纠结，把裁决权交还人类
-  _toHuman({ law, bugKey, closedLoop, systemKey, reason }) {
-    return { kind: 'review', law, reason, bugKey, closedLoop: !!closedLoop, humanDecision: true, systemKey };
+  // [2026-09-24 · 如实呈现（上呈载荷）] 转人工时给**事实**，不给评价：
+  //   actionText  —— 动作原文（人须看到"到底是什么动作"，而不是只看到一个计数）；
+  //   equivalence —— 本次归并的**依据**（引擎按什么把这次与以往归成一类）：
+  //                  'bugKey'    ＝ 按**动作内容**归并（强容器，可跨写法归并）；
+  //                  'systemKey' ＝ 仅按**工具名**归并（弱容器 —— 同一后果**换工具名 ⇒ 不会被归并**）。
+  //   ⇒ 诚实的做法不是假装归并对了，而是**说出自己按什么归并**：跨名等价（"停服务"是否≡"删库"）不可机械复验，
+  //      本就属人的 H ⇒ 归并权移交人类；引擎只报"本窗口同类第 N 次"这一事实（实测：异名 ×12 ⇒ 12 容器、永不达封顶，
+  //      修前那个"永不"是**静默**的，人无从知道；修后它是一行可读的事实）。
+  _toHuman({ law, bugKey, closedLoop, systemKey, reason, call = null }) {
+    return {
+      kind: 'review', law, reason, bugKey, closedLoop: !!closedLoop, humanDecision: true, systemKey,
+      actionText: call ? (extractShell(call) || extractPath(call) || (call?.name ?? null)) : null,
+      equivalence: bugKey ? 'bugKey' : 'systemKey',
+    };
   }
 
   // ---------- 内 H 挂号协议（作者定 · 2026-08-30） ----------
@@ -1465,6 +1495,7 @@ export class WeiwenLawEngine {
         // 达封顶：与既有各分支同构的转人工（不新增判据，只把"反复出现"这条既有线接全）
         out = this._toHuman({
           law: out.law, bugKey: bk, closedLoop: !!out.closedLoop, systemKey: mk.systemKey,
+          call,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次 / 同一 BUG 被标记 ${mk.bugCount} 次，达封顶 ${mk.cap}：AI 停止纠结，转人工决策（含此前无痕的早退路径）`,
         });
       }
@@ -1473,7 +1504,10 @@ export class WeiwenLawEngine {
     if (!this._settleMarked) {
       const ok = out.kind === 'allow';
       this.recordSteady({
-        positive: ok ? 1 : 0,
+        // [2026-09-24 · 如实记录（口径层）] 不再传 positive（**放行 ≠ 增益**）。只把「是否被执行」这一事实
+        //   交给记账层，由记账层按**动作可逆性事实**推 sign：放行 ∧ scar ⇒ '-'，放行 ∧ unknown ⇒ 'unknown'，
+        //   其余 ⇒ '0'。⇒ 修正前实测的 12 条 `+/scar`（同记录内"增益"与"不可逆"并存）。
+        executed: ok,
         subsystem: 'core',
         detail: ok ? null : `截断:${out.kind}/${out.law ?? '-'}`,
         action: extractShell(call) || extractPath(call) || (call?.name ?? null),
@@ -1584,7 +1618,7 @@ export class WeiwenLawEngine {
       // 标记制 escalation（flow1：同一 BUG 拒不修复、反复硬闯）：达封顶转人工，AI 停止纠结
       const mk = this._markIntercept(call, re.bugKey);
       if (mk.human) {
-        return this._toHuman({ law: 'M', bugKey: re.bugKey, closedLoop: true, systemKey: mk.systemKey,
+        return this._toHuman({ law: 'M', bugKey: re.bugKey, closedLoop: true, systemKey: mk.systemKey, call,
           reason: `同一 BUG「${re.bugKey}」被拒不修复、反复硬闯已标记 ${mk.bugCount} 次，达封顶 ${mk.cap}：AI 停止纠结，转人工决策（免耗算力）` });
       }
       // 不计入破窗计数：同一 BUG 反复重跑属"闭环未闭合"，由 guard.attempts 追踪，不污染 D 破窗
@@ -1718,7 +1752,7 @@ export class WeiwenLawEngine {
       this.failureStreak += 1;
       const mk = this._markIntercept(call, halt.bugKey);
       if (mk.human) {
-        return this._toHuman({ law: 'M', bugKey: halt.bugKey, closedLoop: true, systemKey: mk.systemKey,
+        return this._toHuman({ law: 'M', bugKey: halt.bugKey, closedLoop: true, systemKey: mk.systemKey, call,
           reason: `同一 BUG「${halt.bugKey}」被拒不修复、反复硬闯已标记 ${mk.bugCount} 次，达封顶 ${mk.cap}：AI 停止纠结，转人工决策（免耗算力）` });
       }
       const why = [mA?.reason, mB?.reason].filter(Boolean).join(' ｜ ');
@@ -1729,7 +1763,7 @@ export class WeiwenLawEngine {
       const bk = bugKeyOf(call);
       const mk = this._markIntercept(call, bk);
       if (mk.human) {
-        return this._toHuman({ law: 'M', bugKey: bk, closedLoop: false, systemKey: mk.systemKey,
+        return this._toHuman({ law: 'M', bugKey: bk, closedLoop: false, systemKey: mk.systemKey, call,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（含不同伪装），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
       const aLabel = mA ? 'halt' : 'pass';
@@ -1869,7 +1903,7 @@ export class WeiwenLawEngine {
       this.failureStreak += 1; // 高风险计入破窗计数（与 R 命中同权）
       const mk = this._markIntercept(call, bugKeyOf(call));
       if (mk.human) {
-        return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
+        return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey, call,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（不合规拦截累计），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
       return { kind: 'deny', law: '推演', reason: risk.reason, risk: 'high', attrib, deduced: true, mMark: mk, projection: risk.branches };
@@ -1879,16 +1913,19 @@ export class WeiwenLawEngine {
       this._registerWrite(call);
       const mk = this._markIntercept(call, bugKeyOf(call));
       if (mk.human) {
-        return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey,
+        return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey, call,
           reason: `同一系统「${mk.systemKey}」被标记 ${mk.sysCount} 次（灰区反复），达封顶 ${mk.cap}：AI 停止纠结，转人工决策` });
       }
       return { kind: 'review', law: '推演', reason: risk.reason, risk: 'mid', attrib, deduced: true, mMark: mk, projection: risk.branches };
     }
-    // 低风险：放行，记录稳态正向增量（S 只增不减）。登记本会话写盘（链式兜底）。
+    // 低风险：放行。**不再记 positive**（放行 ≠ 增益 —— 修前此处 hardcode `positive: 1`，实测把"例行清理"
+    // 与"放行的不可逆动作"都记成 S 增益，储备面被"放行次数"推高）。改为交事实：executed=true，
+    // 由记账层按动作可逆性推 sign（放行∧scar ⇒ '-'、放行∧unknown ⇒ 'unknown'、其余 '0'）。
+    // 登记本会话写盘（链式兜底）。
     this._registerWrite(call);
     // [2026-09-20 · 洞③ · 同构回填] 放行路径把**原始动作**带进刻痕（命令文本优先，其次路径，最后工具名）
     //   —— 账本刻痕是证据：只记 sign/term 而丢掉动作 ⇒ 事后读不出"当时做了什么"（实测 detail=null）。
-    this.recordSteady({ positive: 1, attrib, action: extractShell(call) || extractPath(call) || (call?.name ?? null) });
+    this.recordSteady({ executed: true, attrib, action: extractShell(call) || extractPath(call) || (call?.name ?? null) });
     return { kind: 'allow', law: '推演', reason: risk.reason, risk: 'low', attrib, deduced: true, projection: risk.branches };
   }
 

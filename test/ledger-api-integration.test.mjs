@@ -52,9 +52,15 @@ test('API 集成：decideToolCall/onFailure 经真实管线把 S 刻痕沉入账
   const tagged = e.sAccount.sSeq().filter((r) => Array.isArray(r.rDomains) && r.rDomains.length > 0);
   assert.ok(tagged.length > 0, 'allow 路径记录带 R 域标签（attrib.layer → domainOf）');
 
-  // sign 语义正确：allow 为 '+', onFailure 为 '-'
+  // sign 语义（2026-09-24 口径修复后）：**无依据不冒充增益** ——
+  //   allow 可逆动作 ⇒ 中性 '0'（修前误为 '+'：把"放行"当"增益"，实测 12 条 `+/scar` 同记录内自相矛盾）；
+  //   onFailure      ⇒ '-'（事实：创伤侵蚀）；
+  //   '+' 只由**有依据的**增益事件产生 —— 经 recordSteady 显式传 positive（引擎公开 API，非直戳 ledger 内部）。
   const signs = e.sAccount.sSeq().map((r) => r.sign);
-  assert.ok(signs.includes('+') && signs.includes('-'), 'S 同时记录了正/负向刻痕');
+  assert.ok(signs.includes('0') && signs.includes('-'), 'allow 记中性刻痕、onFailure 记负向刻痕');
+  assert.ok(!signs.includes('+'), '放行不得冒充增益：账本中不出现无依据的 +');
+  e.recordSteady({ positive: 1, subsystem: 'core', topic: 'heal:closed-loop' });
+  assert.ok(e.sAccount.sSeq().map((r) => r.sign).includes('+'), '显式有据的增益才记 +');
 });
 
 // —— 双证据其二：R 域标签随真实动作类别不同而不同（Micro / Cosmic 等），证明标签来自 attrib 而非写死 ——

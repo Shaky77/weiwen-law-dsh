@@ -124,7 +124,9 @@ test('洞③ 刻痕存原始动作：sSeq 记录 action（旧实现 detail/actio
   e.decideToolCall(RT('ls -la /app/tmp'));
   const rec = e.sAccount.sSeq()[0];
   assert.equal(rec.action, 'ls -la /app/tmp');
-  assert.equal(rec.sign, '+');
+  // [2026-09-24 口径修复] 修前断言 rec.sign==='+'（放行即增益）。可逆只读动作放行 ⇒ 中性刻痕 '0'；
+  //   '+' 只由**有依据的**增益事件产生（显式 positive），不由"放行"冒充。
+  assert.equal(rec.sign, '0');
 });
 
 // ── 对照：本判据只锚 scar 类（有限封闭集），不碰只读/可逆写（不得误伤） ──

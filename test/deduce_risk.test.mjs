@@ -130,12 +130,16 @@ test('推演层分叉：decideToolCall 走推演层时两分支都沉淀进 M（
 });
 
 // ---------------- 推演层不误伤正常操作 ----------------
-test('推演层：读普通文件低风险 → allow 并累积 S', () => {
+test('推演层：读普通文件低风险 → allow 并留中性刻痕', () => {
   const e = new WeiwenLawEngine();
   const d = e.decideToolCall({ name: 'read_file', args: { path: 'README.md' } });
   assert.equal(d.kind, 'allow');
   assert.equal(d.risk, 'low');
-  assert.equal(e.effectiveS(), 1);
+  // [2026-09-24 口径修复] 修前断言 effectiveS()===1（放行即增益）。放行 ≠ 增益 ⇒ 储备不涨；
+  //   且此处动作文本解析为路径（README.md），可逆性**不可判** ⇒ 如实记 'unknown'（明示"不知"），
+  //   **不默认增益** —— 这正是修法的要点（测量面实测：`+/unknown` 那类无依据的增益刻痕归零）。
+  assert.equal(e.effectiveS(), 0);
+  assert.equal(e.sAccount.sSeq().at(-1).sign, 'unknown');
 });
 
 test('推演层：正常 bash 命令低风险 → allow', () => {
