@@ -366,14 +366,15 @@ function apply(ctx) {
       const isReview = decision.kind === 'review';
       // ═══ 白箱贯彻：事实位默认放行（2026-09-24 · 结构修法，不按名挑选）═══
       // 修前此处是「按名挑选」：只列 bugKey/closedLoop/missing/stage/risk 五个名 ⇒ 引擎产出的**其余事实位全部被静默丢弃**。
-      // 实测取证（probe-whitebox-egress.mjs `before`，24 条真 API 输入 / 22 条裁决）：
-      //   mMark 丢 22/22 · conduction 丢 22/22 · innerH 丢 22/22 · attrib 18 · deduced 12 · scarUnanchored 11 · fractalSubM 7 · mCrossCheck 1。
+      // 实测取证（probe-whitebox-egress.mjs `before`，24 条真 API 输入 / **18 条裁决**，同刻同对象法）：
+      //   conduction 丢 18/18 · innerH 丢 18/18 · mMark 丢 17/18 · attrib 丢 15 · deduced 丢 10 · scarUnanchored 丢 9
+      //   · fractalSubM 丢 6 · systemKey/actionText/equivalence/mCrossCheck 各 1 —— **合计 11 类**。
       //   `innerH` 被丢尤其直接违反引擎侧内 H 协议④：「外 H 推演结果与内 H parked 状态**同时交付**」。
       // 为何改结构而非补名字：字段随引擎演化 ⇒ **枚举永远追不上**（X 轴）；放行必须按「位」（Y 轴），一次覆盖现在与将来的全部事实位。
       // 宿主契约读自源码（dsh-tools/lib/index.js:3002 只读 kind/reason；lib/types/index.d.ts:408 类型仅 {kind,reason}）
       //   ⇒ 附加字段被忽略、不做严格校验 ⇒ 对宿主无害；对下游插件与审计面即为白箱。
       // 排除表按**性质**定义（仅「内部实现位」：引擎实例引用／可变内部状态／内 H 推演过程），不按名黑名单；
-      //   实测：22 条裁决的引擎产出**全部可 JSON 序列化、无循环、无函数**（样例 2456 B）⇒ 当前无一项落入排除。
+      //   实测：18 条裁决的引擎产出**全部可 JSON 序列化、无循环、无函数**（样例 2456 B）⇒ 当前无一项落入排除。
       const INTERNAL_ONLY = [];   // 仅内部实现位；事实位一律放行
       const out = { ...decision, kind: 'deny', law: decision.law, reason: `[唯稳律·${decision.law}] ${decision.reason}` };
       for (const k of INTERNAL_ONLY) delete out[k];
