@@ -19,7 +19,9 @@
     "test"
   ],
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\"",
+    "build:docs": "node scripts/build-docs-engine.mjs",
+    "check:docs": "node scripts/build-docs-engine.mjs --check"
   },
   "engines": {
     "node": ">=22"

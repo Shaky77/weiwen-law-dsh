@@ -1,5 +1,5 @@
 // 融合测试：S/D 量化效应传感器接进 DSH 适配层后，引擎裁决不被污染、M 闸门生效。
-// 调用形态严格沿用 probe-sd-mirror.mjs 的 P1–P6，保证「融合后」与「融合前」同基准。
+// 调用形态严格沿用 versions/live/evidence/sd-fusion-mirror/probe-sd-mirror.mjs 的 P1–P6，保证「融合后」与「融合前」同基准。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WeiwenLawEngine } from '../src/core/engine.mjs';

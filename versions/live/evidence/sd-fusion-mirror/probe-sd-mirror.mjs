@@ -2,7 +2,11 @@
 // 镜子面：某 CATE 框架在「无反事实标签 / 隐藏混杂 / 依据不足」时仍硬输出一个数
 //         （假设指标可干净算出），没有「判不出→交人」第三档。
 // 实测：把同结构的「依据不足 / 不可判」调用喂给 DSH，看它是否 review 而非 allow。
-import { WeiwenLawEngine } from './src/core/engine.mjs';
+//
+// 位置（2026-09-25 归位）：本探针与其产出报告同处 versions/live/evidence/sd-fusion-mirror/，
+// 与既有 legal-causal-test/ 同范式（探针 + 产出自成一夹）。此前散在仓库根目录，属错位：
+// 根目录是基础版门面，探针与实测证据归活系统版。运行：node versions/live/evidence/sd-fusion-mirror/probe-sd-mirror.mjs
+import { WeiwenLawEngine } from '../../../../src/core/engine.mjs';
 
 function probe(label, call, frameNote) {
   const e = new WeiwenLawEngine(); // 每个场景独立实例，避免状态污染

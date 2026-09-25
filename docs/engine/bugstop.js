@@ -1,3 +1,6 @@
+// ⚠️ 本文件由 scripts/build-docs-engine.mjs 生成，请勿手改。
+// 源：src/core/bugstop.mjs ｜ 改源码后运行 npm run build:docs
+// 一致性由 test/docs-engine-sync.test.mjs 断言（手工镜像必漂移，故不靠人眼对账）。
 // 第一BUG停止 · 闭环状态机
 // 
 //
