@@ -1171,8 +1171,19 @@ export class WeiwenLawEngine {
     if (hitsInnerH(s)) {
       // 2026-09-02 作者裁定：来源未标注时不可假定"外部侵入"而直接判恶意（deny）。
       // 内 H 名词命中仅说明内容涉内 H 概念，无法判定内外归属（principal 自我设定 vs 外部注入）。
-      // 故标记"定义不明"，交还用户裁决（搁置返回用户决策），不揣测意图、不判恶意。
-      return { kind: 'review', law: 'H', reason: '来源未标注且内容涉及内 H 相关概念（思想/内心/记忆/价值观/自由意志/…），无法判定内外归属——定义不明，交还用户裁决后再执行。' };
+      // [2026-09-27 作者裁定 A · 补充而非收紧] review 的正当性须以"追到底"换取：
+      //   追至 H 层分内外 ⇒ 确认归因后才交还；在词表命中处直接交还＝甩锅。
+      //   本层此前**未跑**可追的结构判据（targetsBehaviorConstraint / looksLikeOperationalDirective
+      //   只在 third-party 分支跑过）⇒ 词表一命中就交还，而词表是枚举（开放集合）、结构判据才可追。
+      //   现补跑（R 层行为面）：命中 ⇒ 行为面（外 H 可观测）在场，追因止于 D 层（来源未标注，
+      //   内外归属不可判）⇒ 不可判恶意、亦不可放行；全未命中 ⇒ 行为面已穷尽，归因确定落于
+      //   内 H（思维/意志不可审计）⇒ 交还主权者。**判决恒为 review**，更正的只是**理由层**
+      //   （升格 deny 会推翻 09-02 裁定，故不做）。
+      const behaviorFace = targetsBehaviorConstraint(s) || looksLikeOperationalDirective(s);
+      if (behaviorFace) {
+        return { kind: 'review', law: 'H', reason: '来源未标注；结构判据命中——内容含指向主体行为约束的形态（外 H 行为面可观测）。追因止于 D 层：来源未标注 ⇒ 内外归属不可判 ⇒ 不可判恶意、亦不可放行，交还用户裁决后再执行。' };
+      }
+      return { kind: 'review', law: 'H', reason: '来源未标注；内容涉内 H 概念（思想/内心/记忆/价值观/自由意志/…）——已跑完本层可执行的行为面判据（结构·指令形态均未命中），归因落于内 H（不可审计），交还主权者裁决后再执行。' };
     }
     // [2026-09-19 · 2026-09-24 同构回填] **动作调用不进本层**：能抽出 shell 命令文本的调用＝agent 自身
     //   提出的**动作**，其合法性由 R 层判定（R 锚检查已过）。本层只审「承载的内容」（外部数据里藏的注入指令）。
@@ -1180,7 +1191,7 @@ export class WeiwenLawEngine {
     //   （git fetch && git rev-parse && git ls-remote && git status）被误判 review，属误伤。
     //   与 isDocWrite（写盘内容＝落定数据）同构：**落点性质**决定该不该审。
     if (!isDocWrite && !isActionCall(call) && looksLikeOperationalDirective(s)) {
-      return { kind: 'review', reason: '来源未标注且内容带有操作指令的形式——无法判定内外，交还人工复核。' };
+      return { kind: 'review', reason: '来源未标注；结构判据命中——内容含操作指令的形式（外 H 行为面可观测，非纯内 H 对象）。追因止于 D 层：来源未标注 ⇒ 内外归属不可判 ⇒ 不可判恶意、亦不可放行，交还人工复核。' };
     }
     return null;
   }
@@ -2076,10 +2087,15 @@ export class WeiwenLawEngine {
       return { kind: 'allow' }; // 外部内容作为数据处理 → 放行
     }
 
-    // 默认（provenance 未知）：静态查词命中内 H 概念 → 标记"定义不明"交还用户裁决（2026-09-02 作者裁定）。
+    // 默认（provenance 未知）：静态查词命中内 H 概念 → 交还用户裁决（2026-09-02 作者裁定）。
+    // [2026-09-27 作者裁定 A] 与 checkInnerH 同构：交还前先追（补跑行为面结构判据，判决不变、理由分层）。
     // 不累加 failureStreak：未定性为违规即不记创伤（不揣测意图、不判恶意）。
     if (hitsInnerH(flat)) {
-      return { kind: 'review', law: 'H', reason: '来源未标注且消息涉及内 H 相关概念，无法判定内外归属——定义不明，交还用户裁决。' };
+      const behaviorFace = targetsBehaviorConstraint(flat) || looksLikeOperationalDirective(flat);
+      if (behaviorFace) {
+        return { kind: 'review', law: 'H', reason: '来源未标注；结构判据命中——消息含指向主体行为约束的形态（外 H 行为面可观测）。追因止于 D 层：来源未标注 ⇒ 内外归属不可判 ⇒ 不可判恶意、亦不可放行，交还用户裁决。' };
+      }
+      return { kind: 'review', law: 'H', reason: '来源未标注；消息涉内 H 概念——已跑完本层可执行的行为面判据（结构·指令形态均未命中），归因落于内 H（不可审计），交还主权者裁决。' };
     }
     return { kind: 'allow' };
   }
