@@ -15,6 +15,11 @@
 
 ---
 
+> 🔗 **在线试跑（零安装）**：**[打开演示页 →](https://shaky77.github.io/weiwen-law-dsh/)**
+>
+> 点开即用 —— 跑的就是本仓开源审计层的**真实引擎**（非演示壳、无硬编码答案）：贴一条命令或代码，看它沿 R→S→D→H→M 在哪一步拦下、以什么理由拦。零服务器、零成本，输入不出本机。
+> 引擎自身不可用时，页面按**整链不可达 + 引擎错误**呈现，**不会给出放行**（缺省方向＝review，与引擎一致）。
+
 ## 30 秒看懂
 
 本仓库把唯稳律因果框架做成 DSH 的插件：给跑在 DSH 上的 AI Agent 挂一套**白箱因果引擎**——
@@ -178,8 +183,11 @@ weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
 src/index.js          # 插件入口：钩子 + 6 个白箱自查工具
 src/core/law.mjs      # 框架定义常量（详见基础版仓库，本仓不展开推导）
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
-test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 282/282 全绿）
+test/                 # 单元测试 + 真实案例测试 + 对齐回归（本地 359/359 全绿）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
+docs/index.html       # 演示页：浏览器内跑真引擎（GitHub Pages 部署源）
+docs/engine/          # 由 src/core/*.mjs 生成的浏览器镜像（勿手改）
+scripts/build-docs-engine.mjs  # 生成器：npm run build:docs / check:docs（验同源漂移）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
 
@@ -281,7 +289,8 @@ dsh --profile web
 ## 开发（Development）
 
 - **依赖**：Node.js `^22.19 || >=24`；运行时依赖仅 `@deepseek-ai/dsh-tools`（peerDependency，可选）。
-- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **282/282 全绿**。
+- **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）；当前实测 **359/359 全绿**。
+- **演示页**：`docs/index.html` 在浏览器内直接跑 `docs/engine/*.js`（由 `src/core/*.mjs` 生成）。**镜像只许生成、不许手改** —— 改完 `src/core` 后跑 `npm run build:docs`，用 `npm run check:docs` 验漂移（返回非零即有漂移）。
 - **构建**：无需构建（纯 ESM + yml overlay）；修改 `src/core/engine.mjs` 后重跑 `npm test` 回归。
 - **贡献**：框架本体（心法层）冻结于基础版仓库，本活系统版承载工程迭代；改动请基于本仓库 PR，并附 `node --test` 实测输出。
 
