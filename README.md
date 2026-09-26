@@ -1,5 +1,9 @@
 # dsh-weiwen-law
 
+> 🔗 **在线试跑（零安装）**：**[打开演示页 →](https://shaky77.github.io/weiwen-law-dsh/)**
+>
+> 点开即用，跑的就是本仓开源审计层的**真实引擎**（非演示壳、无硬编码答案）：贴一条命令或代码，看它沿 R→S→D→H→M 在哪一步拦下、以什么理由拦。零服务器、零成本，输入不出本机；引擎自身不可用时按**整链不可达 + 引擎错误**呈现，**不给放行**（缺省方向＝review）。
+
 > ✅ **已收录**：[dsh-plugin-radar（awesome-dsh-plugins）](https://github.com/AdamPlatin123/dsh-plugin-radar) 登记 PR [#403](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/403) 已于 **2026-08-31** 合并，`PLUGINS.md` 实测在榜（判定档位：**待测**——升「运行级可用」待雷达下次自动扫描刷新数据快照）。
 
 **唯稳律通用因果引擎（白箱呈现）** —— 以 **DeepSeek Harness（DSH）** 的 Cordis 插件形态实现。
@@ -14,11 +18,6 @@
 > ⚖️ **双许可**：开源使用 **AGPL-3.0**；商业集成 / 闭源分发 / 预装合作可取得**独立于 AGPL-3.0 约束**的授权 → 563003@qq.com。详见 [License & security](#license--security) 与 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ---
-
-> 🔗 **在线试跑（零安装）**：**[打开演示页 →](https://shaky77.github.io/weiwen-law-dsh/)**
->
-> 点开即用 —— 跑的就是本仓开源审计层的**真实引擎**（非演示壳、无硬编码答案）：贴一条命令或代码，看它沿 R→S→D→H→M 在哪一步拦下、以什么理由拦。零服务器、零成本，输入不出本机。
-> 引擎自身不可用时，页面按**整链不可达 + 引擎错误**呈现，**不会给出放行**（缺省方向＝review，与引擎一致）。
 
 ## 30 秒看懂
 
