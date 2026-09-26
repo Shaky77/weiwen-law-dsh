@@ -898,10 +898,14 @@ export class WeiwenLawEngine {
     // 
     // 不纠结阈值、不纠结"触发几次锁死"——拦截即标记，标记累计到封顶即转人工，AI 不再耗算力纠结。
     //   mBugForce   ：同一 BUG（bugKey 稳定身份）被拒不修复、反复硬闯的累计标记数 → 达封顶转人工（flow1）
-    //   mSystemMarks：同一系统（systemId/name）被标记的总次数，含不同伪装的多次拦截 → 达封顶转人工（flow2）
     //   mBugSystem  ：bugKey→systemKey 反查映射，供修复闭环回收系统标记
+    // 🔴 [2026-09-26 · 一桶两义拆置（“一个字段不许合并多义”,仪器三戒）]：此前 mSystemMarks 被两个写入点
+    //   共用，语义不同 ⇒ 同名不同义（读侧只读 R 锚键，故当时未显形，属隐患）。
+    //   mInterceptMarks：同一系统（systemId/name）被标记的总次数，含不同伪装的多次拦截 → 达封顶转人工（flow2）
+    //   mSystemMarks   ：R 锚（域）的痕存数（“总＝全量同锚痕存数”）——只由 _bucketRHit 写入、mPoints 读取。
     this.mBugForce = new Map();
-    this.mSystemMarks = new Map();
+    this.mInterceptMarks = new Map();  // 拦截计数桶（key = systemKey）
+    this.mSystemMarks = new Map();     // R 锚痕存桶（key = R 锚）
     this.mMagnitude = new Map();   // [2026-09-18 · 同构回填] key=锚, value=R_DOMAIN 层级（该 M 标记的 magnitude／权重；结构性，非枚举）
     // [2026-09-19 M 位移序列 · 同构回填] 推演所得：M 是坐标点（X=t 序位，Y=R 层级），两 M 点间只有两类位移——
     //   同层重复（Y 不变而 X 前进）＝破窗投影；跨层移动（Y 变化）＝上溯／下沉。
@@ -1038,7 +1042,8 @@ export class WeiwenLawEngine {
       failureStreak: this.failureStreak,
       mHumanCap: this.mHumanCap,
       mBugForce: Object.fromEntries(this.mBugForce),
-      mSystemMarks: Object.fromEntries(this.mSystemMarks),
+      mInterceptMarks: Object.fromEntries(this.mInterceptMarks), // 拦截计数桶（systemKey → 次数）
+      mSystemMarks: Object.fromEntries(this.mSystemMarks),       // R 锚痕存桶（anchor → 痕存数）
       mMagnitude: Object.fromEntries(this.mMagnitude),
       // 注：全量 historyTrail 仍保留于实例（this.historyTrail）供深度审计，默认不进 snapshot。
     };
@@ -1294,8 +1299,9 @@ export class WeiwenLawEngine {
   _markIntercept(call, bugKey) {
     this._interceptMarked = true;   // [2026-09-24] 出口统一落点：本次裁决已落追责痕迹（幂等依据）
     const systemKey = call?.systemId || call?.name || '_unknown';
-    const sysCount = (this.mSystemMarks.get(systemKey) || 0) + 1;
-    this.mSystemMarks.set(systemKey, sysCount);
+    // [2026-09-26 拆桶] 拦截计数只进 mInterceptMarks —— 与 _bucketRHit 的 R 锚痕存桶分置（同名不同义不再共存）
+    const sysCount = (this.mInterceptMarks.get(systemKey) || 0) + 1;
+    this.mInterceptMarks.set(systemKey, sysCount);
     let bugCount = 0;
     if (bugKey) {
       bugCount = (this.mBugForce.get(bugKey) || 0) + 1;
@@ -1310,9 +1316,9 @@ export class WeiwenLawEngine {
   healMMarks(bugKey) {
     const systemKey = this.mBugSystem.get(bugKey);
     if (systemKey) {
-      const left = (this.mSystemMarks.get(systemKey) || 0) - 1;
-      if (left <= 0) this.mSystemMarks.delete(systemKey);
-      else this.mSystemMarks.set(systemKey, left);
+      const left = (this.mInterceptMarks.get(systemKey) || 0) - 1;
+      if (left <= 0) this.mInterceptMarks.delete(systemKey);
+      else this.mInterceptMarks.set(systemKey, left);
       this.mBugSystem.delete(bugKey);
     }
     this.mBugForce.delete(bugKey);
@@ -1420,9 +1426,11 @@ export class WeiwenLawEngine {
 
   deduceRisk(call) {
     const s = inferCallSemantics(call, { sessWritten: this.sessWritten, sessRead: this.sessRead });
-    // 跨调用敏感源登记（FRACTAL_PROPERTY 分形横向递归）：本会话读取的凭据/系统路径（敏感源）
-    // 记入 sessRead，供后续 sink 暴露调用判定「源→汇」组合效应。仅登记 read 类敏感源读取，不猜。
-    if (s.path && (s.isCred || s.isSystem) && s.category === 'read') this.sessRead.add(s.path);
+    // 🔴 [2026-09-26 · 根因修复] 跨调用敏感源登记**已上移至判定层入口**（decideToolCall → _registerSensitiveRead）。
+    //   原病灶（实测 `_stash/jev-bench/h5-realpath-probe.mjs`）：登记语句位于本方法内，而 deduceRisk 只在
+    //   「判定层全过」之后才被调用（见 decideCore 尾部注释）⇒ 登记条件恰是**上游会拦掉的那一类**（敏感读）
+    //   ⇒ 判据自否定：越敏感 ⇒ 越早退 ⇒ 越到不了登记点 ⇒ refsSessionSensitiveRead「源→汇」通道结构上不可达。
+    //   为何测试全绿却未暴露：既有用例直调 deduceRisk（绕过判定层）⇒ 只测了后半段，前段断路未被覆盖。
     // H 分叉：S 增路径 + D 增(蚀)路径 同时模拟（并行，非二选一）
     const bS = simulateBranch(s, 'S+1');
     const bD = simulateBranch(s, 'D-1');
@@ -1441,6 +1449,16 @@ export class WeiwenLawEngine {
     if (erosion < 0 || !sOk) {
       return { verdict: 'review', m, branches: { bS, bD }, deduced: true,
         reason: `推演判定中风险（${!sOk ? 'S+1 不成立：无法证明稳态增量' : `D 路径轻度侵蚀 S：${bD.note || '灰区'}`}）：建议限权/二次确认` };
+    }
+    // [2026-09-26 · reason 正位（安 空输入判据 · 根因级）] 无动作文本 ⇒ **如实陈述**，不套"S 增路径成立"。
+    //   安的原话：「空，没有上下文，仅仅只是空，按照唯稳律推演，空没有任何上下浮动，持平稳定，
+    //   那么 M 未变，没有风险。」⇒ **真空（D 层无扰动可入）⇒ S 持平 ⇒ M 未变 ⇒ 无风险** ⇒ allow 正确。
+    //   变的只是**理由**：原理由「S 增路径成立」在空动作下是**无据断言**（空无从证明 S 增；
+    //   实测 bS 走的是"未发现风险信号"的默认真值）⇒ **判决对 ＋ 理由假 ＝ 真的假话**（四象限一格）。
+    //   此处改为真伪陈述：说我"没抽到动作"，不说我"证明了增益"。
+    if (!extractShell(call) && !extractPath(call)) {
+      return { verdict: 'allow', m, branches: { bS, bD }, deduced: true,
+        reason: '无扰动入基线（未抽到动作文本）：S 持平、M 未变 ⇒ 无风险，放行' };
     }
     // 双成立（S+1=+1 且 D 侵蚀=0）→ 风险=0 < 唯稳律 < 稳态 严格成立 → allow
     return { verdict: 'allow', m, branches: { bS, bD }, deduced: true,
@@ -1461,6 +1479,7 @@ export class WeiwenLawEngine {
   // 外 H 推演在 _decideCore 内完成；出口统一挂载内 H parked 状态（内 H 挂号协议 ④：同时交付）。
   decideToolCall(call, utterance) {
     this.conduction = [];                       // 本次裁决的链落点（每次重建，不跨调用累积）
+    this._registerSensitiveRead(call);          // 跨调用敏感源登记（判定层入口 · 早于任何早退）
     const core = this._decideCore(call, utterance);
     const res = this._settleExit(core, call);   // ═══ 出口统一终局落点 ═══（结构保证，不依赖各分支各自记得）
     // ═══ ⑤ M 格：稳态结果 ═══（**每个出口都必须在 M 有落点** —— 此前出口只回 {kind,law,reason}，
@@ -2012,6 +2031,20 @@ export class WeiwenLawEngine {
         actionVerb: ap.verb, actionNoun: ap.noun, layer: ap.layer, conflicts,
       },
     };
+  }
+
+  // ---------- 跨调用敏感源登记（判定层入口 · 2026-09-26 根因修复）----------
+  // 🔴 病灶（实测 `_stash/jev-bench/h5-realpath-probe.mjs`，修前：真入口 sessRead.size=0）：
+  //   原登记语句写在 deduceRisk() 内，而 deduceRisk 只在「判定层全过」之后才被调用
+  //   ⇒ 登记条件（敏感读）恰是上游判定层会拦掉的那一类 ⇒ **判据自否定**：越敏感 ⇒ 越早退 ⇒ 越登记不上。
+  //   几何级判据（已入框架册主干判据库 #14）：**判据点／登记点不得位于被上游绕过的分支内。**
+  // 修法（结构，非枚举）：登记移到**判定层入口**，与 sessWritten 同级、**早于任何早退**。
+  //   语义定位：登记记的是**本会话发生过的敏感接触这一事实**，不随本次裁决结果而变
+  //   （被拦下的读同样发生过接触 ⇒ 后续 sink 暴露须按「源→汇」保守复核 —— 方向与缺省方向纪律一致：判不出则保守）。
+  //   既有用例直调 deduceRisk ⇒ 只覆盖后半段；本次补真入口回归（test/residual-rdomain-fractal.test.mjs「真入口」组）。
+  _registerSensitiveRead(call) {
+    const s = inferCallSemantics(call, { sessWritten: this.sessWritten, sessRead: this.sessRead });
+    if (s.path && (s.isCred || s.isSystem) && s.category === 'read') this.sessRead.add(s.path);
   }
 
   // 本会话写盘登记（链式状态兜底）：write 放行时记录 path→content，

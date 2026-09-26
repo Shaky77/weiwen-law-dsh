@@ -225,8 +225,25 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
     const name = ({ bash:'bash', exec:'exec', read:'read_file', write:'write_file', custom:'tool' })[t] || 'tool';
     return { name, command:text, code:text, args:{ task:text, path:text, content:text, payload:text } };
   }
+  // 🔴 [2026-09-26 · 健壮性兜底] 引擎加载超时 —— 缺省方向必须覆盖「挂起」这条路径。
+  //   外部实测独立复现：CDN 传输停滞时 `import()` 既不 resolve 也不 reject
+  //   （原始读数：`REQ engine.js → RESP 200 cl=65511 →（20 秒无任何事件）`，无 FIN、零错误）
+  //   ⇒ 访客看到「没有任何反应」——既不判也不报，是「判不出就 review」原则未覆盖的缺口。
+  //   修法：Promise.race 超时 ⇒ 落既有 catch ⇒ `_err` ⇒ 整链 unreach ＋ 引擎错误 ＋ deny 色，绝不静默。
+  const ENGINE_LOAD_TIMEOUT_MS = 15000;
+  const ENGINE_LOAD_TIMEOUT_MSG = {
+    zh: '网络停滞：15 秒内未收到引擎脚本（CDN 传输未完成）',
+    en: 'Network stalled: engine script not received within 15s (CDN transfer incomplete)'
+  };
   async function ensureEngine(){
-    if(!_engineMod) _engineMod = await import('./engine/engine.js');
+    if(!_engineMod){
+      _engineMod = Promise.race([
+        import('./engine/engine.js'),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error(
+          document.body.classList.contains('lang-en') ? ENGINE_LOAD_TIMEOUT_MSG.en : ENGINE_LOAD_TIMEOUT_MSG.zh
+        )), ENGINE_LOAD_TIMEOUT_MS))
+      ]).catch(err=>{ _engineMod = null; throw err; }); // 失败态不永久缓存：网络恢复后重试可成功
+    }
     return _engineMod;
   }
   async function runDemo(){
@@ -275,8 +292,13 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
         for(; i<5; i++) nodes[i].classList.add('unreach');
         let tag, sub;
         if(kind==='allow'){
-          tag = en ? 'ALLOW · 放行' : 'ALLOW · 放行';
-          sub = en ? 'Causal chain shows no unacceptable depletion; steady state sufficient — allow.' : '因果链全程无不可接受的侵蚀，稳态充足——放行。';
+          tag = 'ALLOW · 放行';
+          // 🔴 [2026-09-26 · 去不实] allow 原先**丢弃引擎理由**，改用本页硬编码文案
+          //   （「因果链全程无不可接受的侵蚀，稳态充足——放行。」）⇒ **页面替引擎说了话**，
+          //   且与引擎实际判据可能不符（空输入的真实依据是「无扰动入基线 ⇒ M 未变」，不是「无侵蚀」）
+          //   ⇒ 非 allow 分支回显 d.reason、allow 分支却自撰理由，同一页面两套口径。
+          //   改为**如实回显引擎理由**，页面不再代为断言（与 deny/review 分支同口径）。
+          sub = d.reason || (en ? 'Causal chain shows no unacceptable depletion; steady state sufficient — allow.' : '因果链全程无不可接受的侵蚀，稳态充足——放行。');
         } else {
           const ll = LAW_LABEL[law] || { zh:law, en:law };
           const verb = kind==='review' ? (en?'REVIEW · 建议二次确认':'REVIEW · 建议二次确认') : (en?'DENY · 拦截':'DENY · 拦截');
