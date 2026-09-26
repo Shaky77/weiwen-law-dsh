@@ -137,11 +137,11 @@
       <div class="demo">
         <div class="ctrl">
           <select id="toolType" class="tool-type">
-            <option value="bash"><span class="blk zh">Shell 命令</span><span class="blk en">Shell command</span></option>
-            <option value="exec"><span class="blk zh">代码执行</span><span class="blk en">Code exec</span></option>
-            <option value="read"><span class="blk zh">读文件</span><span class="blk en">Read file</span></option>
-            <option value="write"><span class="blk zh">写文件</span><span class="blk en">Write file</span></option>
-            <option value="custom"><span class="blk zh">自定义工具名</span><span class="blk en">Custom tool</span></option>
+            <option value="bash" data-zh="Shell 命令" data-en="Shell command">Shell 命令</option>
+            <option value="exec" data-zh="代码执行" data-en="Code exec">代码执行</option>
+            <option value="read" data-zh="读文件" data-en="Read file">读文件</option>
+            <option value="write" data-zh="写文件" data-en="Write file">写文件</option>
+            <option value="custom" data-zh="自定义工具名" data-en="Custom tool">自定义工具名</option>
           </select>
         </div>
         <textarea id="usrInput" class="tryin">cat .env</textarea>
@@ -195,9 +195,17 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
   </footer>
 
 <script>
+  // <option> 不参与 CSS display，双语不能用 .blk 切换，只能改 option 文本
+  function applyOptionLang(en){
+    document.querySelectorAll('#toolType option').forEach(o=>{
+      const t = en ? o.getAttribute('data-en') : o.getAttribute('data-zh');
+      if(t) o.textContent = t;
+    });
+  }
   function toggleLang(){
     const en = document.body.classList.toggle('lang-en');
     document.getElementById('langToggle').textContent = en ? '中 / EN' : 'EN / 中';
+    applyOptionLang(en);
     if(_last) renderVerdict(_last, en); else runDemo();
   }
 
@@ -228,7 +236,9 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
       const mod = await ensureEngine();
       d = new mod.WeiwenLawEngine({}).decideToolCall(buildCall());
     } catch(err){
-      d = { kind:'allow', law:null, reason:(en?'Engine load failed: ':'引擎加载失败：') + err.message, _err:true };
+      // 缺省方向＝review：引擎判不出就不放行。引擎自身故障另由 _err 标记，
+      // 渲染层按「整链不可达 + 引擎错误」呈现，绝不落到 allow 语义。
+      d = { kind:'review', law:null, errMsg: err.message, reason:(en?'Engine load failed: ':'引擎加载失败：') + err.message, _err:true };
     }
     _last = d;
     renderVerdict(d, en);
@@ -240,6 +250,19 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
     nodes.forEach(n=>n.classList.remove('pass','stop','active','unreach'));
     const kind = d.kind, law = d.law;
     const idx = law ? (LAW_IDX[law] ?? 4) : 4;
+    if(d._err){
+      // 引擎不可达：链上不产生任何判定 —— 整链标为不可达，结论层报引擎错误，绝不落到 allow
+      const esc = s => String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+      const msg = (en?'Engine load failed: ':'引擎加载失败：') + esc(d.errMsg || d.reason || '');
+      let j = 0;
+      const tickErr = ()=>{
+        if(j < nodes.length){ nodes[j].classList.add('unreach'); j++; setTimeout(tickErr, 220); return; }
+        v.className = 'verdict show deny';
+        v.innerHTML = (en?'ENGINE ERROR':'引擎错误') + '<span class="sub">' + msg + '</span>';
+      };
+      setTimeout(tickErr, 120);
+      return;
+    }
     let i = 0;
     const tick = ()=>{
       if(i <= (kind==='allow' ? 4 : idx)){
@@ -251,8 +274,7 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
       } else {
         for(; i<5; i++) nodes[i].classList.add('unreach');
         let tag, sub;
-        if(d._err){ tag = en?'ENGINE ERROR':'引擎错误'; sub = d.reason; }
-        else if(kind==='allow'){
+        if(kind==='allow'){
           tag = en ? 'ALLOW · 放行' : 'ALLOW · 放行';
           sub = en ? 'Causal chain shows no unacceptable depletion; steady state sufficient — allow.' : '因果链全程无不可接受的侵蚀，稳态充足——放行。';
         } else {
@@ -270,7 +292,7 @@ npm test        <span class="c"># 开源审计层全套单测</span></div>
   document.querySelectorAll('.chip-btn').forEach(b=>{
     b.addEventListener('click', ()=>{ document.getElementById('usrInput').value = b.getAttribute('data-fill'); runDemo(); });
   });
-  window.addEventListener('load', ()=>{ setTimeout(runDemo, 400); });
+  window.addEventListener('load', ()=>{ applyOptionLang(document.body.classList.contains('lang-en')); setTimeout(runDemo, 400); });
 </script>
 
 </body>

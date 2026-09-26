@@ -1,17 +1,20 @@
 name: Deploy DSH engine demo to GitHub Pages
 
 on:
-  # 当前 Shaky77/weiwen-law-dsh 尚未在仓库 Settings 启用 GitHub Pages
-  # （has_pages=false）。若保留 push 自动触发，每次改动 docs/** 都会产生
-  # 一个必定失败的运行。故暂时改为仅手动触发（workflow_dispatch）：
-  #   - 启用 Pages 后（Settings → Pages → Source 选 GitHub Actions），
-  #     可在 Actions 页点 "Run workflow" 手动部署；
-  #   - 如需恢复 push 自动部署，取消下方 push 段的注释即可。
+  # 2026-09-26 更正：本仓 Pages 已启用（Source = GitHub Actions）。
+  #   依据：2026-08-27T02:58Z 的 run #1（push 触发）失败，是因当时尚未启用；
+  #   同日 05:08Z 的 run #2（workflow_dispatch）成功，线上
+  #   shaky77.github.io/weiwen-law-dsh 即该次产物（Last-Modified 与之一致）。
+  # 原注释所述「尚未启用 Pages（has_pages=false）」已失效。
+  # 且因 push 段长期被注释，2026-09-25 的引擎更新（f8c0d59）未能上线，
+  # 线上长期滞留 08-27 的旧引擎（engine.js 35 KB / 缺 3 个模块）。
+  # 现恢复 push 自动部署，并让工作流自身改动也可触发（避免"改了部署配置却不生效"）。
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
-  # push:
-  #   branches: [ main ]
-  #   paths:
-  #     - 'docs/**'
 
 permissions:
   contents: read
