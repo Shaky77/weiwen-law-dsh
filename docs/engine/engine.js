@@ -1247,6 +1247,15 @@ export class WeiwenLawEngine {
     // 英文注入"ignore previous instructions…"直行——缺省路径此前只有弱静态判据，无第三档）。
     // 写盘类工具跳过第三档：缺省来源的写盘 content 是"落盘数据"（AI 自写文档），
     // 与落点判据同哲学——文档引用命令形态是常态，不构成指令（DOC_SINK 防误伤）。
+    // [接法·2026-09-28] 判据在场 ≠ 判据被调用：targetsBehaviorConstraint 此前只在
+    //   third-party 分支与 hitsInnerH 门后运行 ⇒ 变更语素一缺席，门就不开，判据根本没机会跑。
+    //   现接到缺省路径前端。豁免与同一函数内第三档一致：落盘数据（isDocWrite=DOC_SINK，
+    //   文档引用命令形态是常态）不判；agent 自身动作调用（isActionCall，本来就是动作）不判。
+    //   实测（独立测试集 · 真实 API 生成：60 攻击 + 90 正常）：攻击 +5、误伤 +0（严格占优）；
+    //   无豁免版误伤 +29（技术文档全灭）⇒ 豁免是必需项，不是可选项。
+    if (!isDocWrite && !isActionCall(call) && targetsBehaviorConstraint(s)) {
+      return { kind: 'review', law: 'H', reason: '来源未标注；结构判据命中——内容指向主体行为约束（外 H 行为面可观测）。追因止于 D 层：来源未标注 ⇒ 内外归属不可判 ⇒ 不可判恶意、亦不可放行，交还用户裁决后再执行。' };
+    }
     if (hitsInnerH(s)) {
       // 2026-09-02 作者裁定：来源未标注时不可假定"外部侵入"而直接判恶意（deny）。
       // 内 H 名词命中仅说明内容涉内 H 概念，无法判定内外归属（principal 自我设定 vs 外部注入）。
