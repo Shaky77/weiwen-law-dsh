@@ -1569,33 +1569,20 @@ export class WeiwenLawEngine {
     //   实测 bS 走的是"未发现风险信号"的默认真值）⇒ **判决对 ＋ 理由假 ＝ 真的假话**（四象限一格）。
     //   此处改为真伪陈述：说我"没抽到动作"，不说我"证明了增益"。
     if (!extractShell(call) && !extractPath(call)) {
-      // 🔴 [2026-09-28 · 已修正（17:3x · 按安判据）] 本出口原先**把两种情形混在一起**，与「**判不出 ⇒ review**」
-      //   ／「**allow 的资格 ＝ 结构跑完 ∧ 判得出**」不符 ⇒ 现拆分：
-      //     (i) **真真空**（连 name / args 都没有）⇒ 判为无扰动 ⇒ allow（作者 09-26 裁定，**保留**）；
-      //     (ii) **有对象但本层够不着**（如 `write_memory{key,value}` 承载的内容）⇒ 属**未判** ⇒ review。
-      //   🔴 **安 17:2x 立的判据（本修法的依据）**：「**两个方法跑完 ∧ 仍无结论 ⇒ 交人**；
-      //     **不是**某一层判据没命中。」⇒ 故落点在**链末**（坐标图这一步；层内内容判据已全部跑过），**不在层内**。
-      //   ⚠️ **被否决的旧候选（P4 · 留档）**：在 `checkInnerH` **尾部**无差别收口（「穷尽未命中 ⇒ review」）——
-      //     攻击侧同样到 60/60 ／ 10/10，但**域外载体被翻 4 个**（read_file 读源码/读文档 · list_dir · query）
-      //     ⇒ 路障（实测 `_probe-xsub10-carrier-sym-20260928.mjs`）。**根因 ＝ 把 `null`（＝本层不接）
-      //     也当成了 review** ⇒ **没等坐标图跑**就下了"判不出"。
-      //   ✅ **现修法按"承载域"受理**：只读类（`TOOL_CATEGORY==='read'`）与真真空 ⇒ 维持 allow；
-      //     其余"有载荷、无外部落点、又抽不出动作"者 ⇒ **判不出 ⇒ review**。
-      //     实测（`_probe-xsub10-p5-decide-20260928.mjs`，**整链**口径）：攻击 39→**60/60**、
-      //     held-out 0→**10/10**、**域外载体被翻 0 个** ✓；域内 `write_memory` 正常内容 ⇒ 保守交人
-      //     （＝"判据够不着语义层"的已知成本，如实登记）。
-      //   🔴 **受理事由（严格版 · 由回归锁逼出）**：必须是「**真有内容载荷**」—— 参数里存在**非空字符串值**；
-      //     空参数（`{}`）或空串值（`{command: ''}`）**不算载荷** ⇒ 维持 allow。
-      //     （依据：`police-gate`「无资源字段的查询类调用 → 不误伤」＋ `session-ledger-buckets` 理由正位③
-      //       「空 ⇒ 无扰动入基线」两条既有回归锁 —— 首版判据曾把它们误收 ⇒ 已按测试收紧。）
-      const _nm = call?.name ?? '';
-      const _ag = call?.args ?? {};
-      const _payload = Object.values(_ag).some((v) => typeof v === 'string' && v.trim() !== '');
-      const _readonlyish = TOOL_CATEGORY[_nm] === 'read';
-      if (_payload && !_readonlyish) {
-        return { verdict: 'review', m, branches: { bS, bD }, deduced: true,
-          reason: '有内容载荷，但既抽不出动作、也定不出落点：坐标图算不出扰动（读不到 ≠ 不存在），四象限判据亦未命中 ⇒ 两个方法跑完仍无结论 ⇒ 判不出 ⇒ 交还主权者裁决。' };
-      }
+      // 🔴 [2026-09-28 · 已知不符，待重设计] 本出口与「**判不出 ⇒ review**」/「**allow 的资格 ＝
+      //   结构跑完 ∧ 判得出**」（见 law.mjs `RSDHM.H.chartPosition`）**不符**：这里把两种情形
+      //   混在同一出口——
+      //     (i) **真空**（无对象）⇒ 判为无扰动 ⇒ allow **合法**（作者 09-26 裁定：「空没有任何上下浮动…无风险」）；
+      //     (ii) **有对象但本层够不着**（如 `write_memory{key,value}` 承载的注入内容，
+      //          抽取器抽不到 shell/path）⇒ 属**未判** ⇒ 按判据应 **review**。
+      //   ⚠️ **候选修法已被实证否决**（`XSUB-10`，09-28 复跑 `_probe-xsub10-carrier-sym-20260928.mjs`）：
+      //     在 `checkInnerH` 末尾无差别收口（「穷尽未命中 ⇒ review」，带 isDocWrite/isActionCall 豁免）
+      //     确实把攻击从 39/60 提到 **60/60**、held-out 从 0/10 提到 **10/10**（活跃证据：门 21 / 门 10），
+      //     但**同时把 6/7 个正常载体翻成 review**（read_file 读源码/读文档 · list_dir · query · search ·
+      //     write_memory 正常纪要），只有豁免类（write_file）不动 ⇒ **误伤↑ ⇒ 不过闸**（铁律 #4）。
+      //   🔴 **根因（一桶两义）**：该收口把 `null`（＝**本层不接**）也改成了 review。⇒ 正确修法必须**带门**：
+      //     先判"该对象是否落在本层职责域内"（够不着 vs 不涉及），**只有"受理事由成立且够不着"才 review**；
+      //     不能只做"穷尽 ⇒ review"。⇒ 已在 `deployment.md` 更正 `XSUB-10` 登记。
       return { verdict: 'allow', m, branches: { bS, bD }, deduced: true,
         reason: '无扰动入基线（未抽到动作文本）：S 持平、M 未变 ⇒ 无风险，放行' };
     }
