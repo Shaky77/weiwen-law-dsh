@@ -5,3 +5,6 @@ runtime.log
 .verify/
 # 内部对齐报告（私域文档，不进仓库门面）
 ALIGNMENT_REPORT.md
+
+# 探针产物（本地产出，不入库）
+quadrant-criteria-probe.out.json
