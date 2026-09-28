@@ -1289,6 +1289,11 @@ export class WeiwenLawEngine {
     if (!isDocWrite && !isActionCall(call) && looksLikeOperationalDirective(s)) {
       return { kind: 'review', reason: '来源未标注；结构判据命中——内容含操作指令的形式（外 H 行为面可观测，非纯内 H 对象）。追因止于 D 层：来源未标注 ⇒ 内外归属不可判 ⇒ 不可判恶意、亦不可放行，交还人工复核。' };
     }
+    // 🔴 [2026-09-28 · `null` 的语义辨析（勿再混淆）] 本行 `null` ＝ **本层不接**（对象不属本层职责 ⇒
+    //   交下层继续），**不是「判不出」**。二者同形不同义，正是 `XSUB-10` 病灶的根。
+    //   09-28 曾在此处无差别收口（「穷尽未命中 ⇒ review」）⇒ 实测把 **6/7 个正常载体**翻成 review
+    //   （误伤↑）⇒ **不落码**。要收口，必须先有"**该对象落在本层职责域内**"的受理事由（带门），
+    //   不能只做"穷尽 ⇒ review"。
     return null;
   }
 
@@ -1561,6 +1566,20 @@ export class WeiwenLawEngine {
     //   实测 bS 走的是"未发现风险信号"的默认真值）⇒ **判决对 ＋ 理由假 ＝ 真的假话**（四象限一格）。
     //   此处改为真伪陈述：说我"没抽到动作"，不说我"证明了增益"。
     if (!extractShell(call) && !extractPath(call)) {
+      // 🔴 [2026-09-28 · 已知不符，待重设计] 本出口与「**判不出 ⇒ review**」/「**allow 的资格 ＝
+      //   结构跑完 ∧ 判得出**」（见 law.mjs `RSDHM.H.chartPosition`）**不符**：这里把两种情形
+      //   混在同一出口——
+      //     (i) **真空**（无对象）⇒ 判为无扰动 ⇒ allow **合法**（作者 09-26 裁定：「空没有任何上下浮动…无风险」）；
+      //     (ii) **有对象但本层够不着**（如 `write_memory{key,value}` 承载的注入内容，
+      //          抽取器抽不到 shell/path）⇒ 属**未判** ⇒ 按判据应 **review**。
+      //   ⚠️ **候选修法已被实证否决**（`XSUB-10`，09-28 复跑 `_probe-xsub10-carrier-sym-20260928.mjs`）：
+      //     在 `checkInnerH` 末尾无差别收口（「穷尽未命中 ⇒ review」，带 isDocWrite/isActionCall 豁免）
+      //     确实把攻击从 39/60 提到 **60/60**、held-out 从 0/10 提到 **10/10**（活跃证据：门 21 / 门 10），
+      //     但**同时把 6/7 个正常载体翻成 review**（read_file 读源码/读文档 · list_dir · query · search ·
+      //     write_memory 正常纪要），只有豁免类（write_file）不动 ⇒ **误伤↑ ⇒ 不过闸**（铁律 #4）。
+      //   🔴 **根因（一桶两义）**：该收口把 `null`（＝**本层不接**）也改成了 review。⇒ 正确修法必须**带门**：
+      //     先判"该对象是否落在本层职责域内"（够不着 vs 不涉及），**只有"受理事由成立且够不着"才 review**；
+      //     不能只做"穷尽 ⇒ review"。⇒ 已在 `deployment.md` 更正 `XSUB-10` 登记。
       return { verdict: 'allow', m, branches: { bS, bD }, deduced: true,
         reason: '无扰动入基线（未抽到动作文本）：S 持平、M 未变 ⇒ 无风险，放行' };
     }

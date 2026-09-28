@@ -61,7 +61,7 @@
 | **R 刚性锚点**      | `tools/pre-execute`（waterfall）         | 触及刚性锚点 → 返回 `{ kind:'deny', reason }` 阻断         |
 | **D 破窗止损**      | `tools/pre-execute` + 破窗计数             | 连续越界/失败达阈值 → 升级为 deny，防扩散                        |
 | **S 稳态储备**      | 引擎内 append-only 记账                     | 只增不减；`+s` 正向 / `\|‑s\|` 创伤 / 木桶取最短板              |
-| **H 内 H 不可侵**   | `tools/pre-execute` + `agent/pre-step` | 命中主体性黑箱 → deny / reject                          |
+| **H 内 H 不可侵**   | `tools/pre-execute` + `agent/pre-step` | **归因不明 / 落内 H ⇒ `review`**（交还主权者裁决）；**归因落外 H 且证据确凿 ⇒ `deny`**；步骤级 ⇒ `reject`。**不是"命中黑箱就 deny"**——H 在坐标图外（`law.mjs` `RSDHM.H.chartPosition`），归因不可判时唯一合法出口是交还，不是替主体定罪 |
 | **M 第一 Bug 停机** | `tools/pre-execute` 返回 deny            | 检测不可恢复悖论 → 切断该环节（以断保续）                           |
 | **分形**          | 子代理/子任务递归挂载                            | 同一 bundle 在子上下文实例化                               |
 | **白箱审计**        | DSH 原生轨迹日志 + `tools/result`            | 复用 append-only session log；`tools/result` 仅观察不改写 |
