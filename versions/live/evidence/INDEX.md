@@ -48,3 +48,4 @@
 
 - [weiwen-vs-market-causal.md](weiwen-vs-market-causal.md) —— 通用型因果定位：唯稳律与市面「因果」方案的区别（prior-art 对照与诚实边界）。
 - [legal-causal-test/](legal-causal-test/) —— 跨法域因果实测（2026-08-27）：16 真实判例场景（美/英陪审团 vs 中法官制）跑真实引擎，结构判定完全一致，证法域中性。
+- [quadrant-criteria-2026-09-28.md](quadrant-criteria-2026-09-28.md) —— 四象限判据 · 真 API 实测（2026-09-28）：证「内框清单 ≡ 例示」（未列出的对 Z1 **10/10**、非内框对 K 组**拒绝 10/10**）、四格整名语义规则可执行（纯规则题 3/3）、臂 R+ 回归**无退化**（59/60·30/30·10/10）；**如实报出一格未闭合**（「善意的谎言 ⇒ 假的假话」两种规则表述均推不出，卡点在「表面」维定义），并附**推演预测与三条候选修法**。配合 [`docs/quadrant-judgment.md`](../../../docs/quadrant-judgment.md)。

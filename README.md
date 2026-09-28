@@ -186,6 +186,8 @@ test/                 # 单元测试 + 真实案例测试 + 对齐回归（`npm 
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 docs/index.html       # 演示页：浏览器内跑真引擎（GitHub Pages 部署源）
 docs/engine/          # 由 src/core/*.mjs 生成的浏览器镜像（勿手改）
+docs/quadrant-judgment.md      # 四象限判据规格（判决语层：内框/外框/四格 · M = 内框 + 外框）
+docs/review-flow-spec.md       # review 档六步执行规格（含「推演后果一起交还」）
 scripts/build-docs-engine.mjs  # 生成器：npm run build:docs / check:docs（验同源漂移）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
