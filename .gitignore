@@ -8,3 +8,5 @@ ALIGNMENT_REPORT.md
 
 # 探针产物（本地产出，不入库）
 quadrant-criteria-probe.out.json
+_grammar-slot-*.json
+grammar-slot-probe*.json
