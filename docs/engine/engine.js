@@ -24,6 +24,59 @@ const rAuthority = (level) => (level == null ? 1 : Math.max(1, R_MAX_LEVEL + 1 -
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
 // 根除"动词藏在 command/name 里就漏判"的盲区（如 read_file 读 .env）。
 // 推演层（deduceRisk）沿 RSDHM 前向模拟后果，兜住判定层给不出确定结论的灰色地带。
+// ═══ [XSUB-12 · VI] 统一判据：本层判据的「落点」在不在 ═══
+// 立论：四条同族问题（XSUB-08 / XSUB-10 / XSUB-11 / 09-29 名不带行）是**一个问题**：
+//   「判不出来的时候，该放还是该收？」
+// 病灶（一桶两义，两处同形）：
+//   (i)  return null 既表示「本层不接」（对象不属本层 ⇒ 交下层，正确），
+//        又表示「本层判不出」（应 review）⇒ 两者在调用点不可分。
+//   (ii) 归因层 attrib.ok=true 把「整名注册」与「词素偶然命中」装进同一个桶 ⇒
+//        半识别态（write_memory 含 'write' 却从未注册）被两个闸当成"已识别"放行。
+// 出口唯一形态（＝判据可落性）：
+//   本层的行为面判据（其输入面 ＝ 外部位置/命令文本）在这个调用上**有没有落点**？
+//     有落点 ⇒ 够得着 ⇒ 判得出（放行或拦截，由原链决定）—— 本判据不介入
+//     无落点 ∧ 却带着载荷 ⇒ **穷尽而无落点 ＝ 未判（≠ 判为无）** ⇒ 收口
+//     无载荷 ⇒ 本层不受理该对象（真空）⇒ 不介入（交名中性闸，缺省放行合法）
+// 「位置量」的两套口径合并（原本互相失血，见 gen 里乙/戊的对照实证）：
+//   · 键名口径（extractPath：只认 path/file）—— 漏 file_path / target / url
+//   · 值形态口径（似路径）—— 会被"载荷自身含斜杠的散文"骗（A6 实证）
+//   ⇒ 取**键名的词法**（不是键名枚举，也不是值形态）：键在语义上是否在指定位置。
+//     误差方向恒为**安全侧**（漏认 ⇒ 收 ⇒ review），符合 XSUB-08 定案方向。
+function _sh12PayloadPresent(call) {
+  const a = call?.args ?? {};
+  for (const k of Object.keys(a)) {
+    const v = a[k];
+    if (v == null) continue;
+    if (typeof v === 'string' && v !== '') return true;
+    if (typeof v === 'number' || typeof v === 'boolean') return true;
+    if (Array.isArray(v) && v.length) return true;
+    if (typeof v === 'object' && Object.keys(v).length) return true;
+  }
+  return false;
+}
+// 键名「像在指定位置」——词素（例示，非完备清单；不在表内者落入安全侧：收）
+const _SH12_LOC_KEY = /(path|file|dir|folder|target|url|uri|endpoint|bucket|resource|doc)/i;
+function _sh12LocKeyShape(call) {
+  let hit = false;
+  const walk = (o, d) => {
+    if (hit || d > 3 || o == null) return;
+    if (Array.isArray(o)) { o.forEach((x) => walk(x, d + 1)); return; }
+    if (typeof o === 'object') {
+      for (const k of Object.keys(o)) {
+        if (_SH12_LOC_KEY.test(k)) { hit = true; return; }
+        walk(o[k], d + 1);
+      }
+    }
+  };
+  walk(call?.args, 0);
+  return hit;
+}
+function _sh12OffFaceI(call) {
+  if (extractPath(call) || extractShell(call)) return false; // 现成抽取器：够得着
+  if (_sh12LocKeyShape(call)) return false;                  // 键名词法：位置量在场 ⇒ 够得着
+  return _sh12PayloadPresent(call);                          // 无落点 ∧ 有载荷 ⇒ 未判 ⇒ 收
+}
+
 const TOOL_CATEGORY = {
   read_file: 'read', read_inner_h: 'read', read: 'read', query_inner_h: 'read',
   write_file: 'write', write: 'write', edit: 'write',
@@ -2048,6 +2101,13 @@ export class WeiwenLawEngine {
     });
     // 两路分支都汇入 M（独立事件沉淀），无论裁决结果先记 M
     this.recordDeduction(risk.m);
+    // [XSUB-12] 判据可落性：本层行为面判据（输入面＝外部位置/命令文本）在此调用上**无落点**，
+    //   而该调用**确实带着载荷** ⇒ 穷尽而无落点 ＝ 未判（≠ 判为无）⇒ 不得 allow ⇒ 交还主权者裁决。
+    if (risk.verdict === 'allow' && _sh12OffFaceI(call)) {
+      this._registerWrite(call);
+      const mkS = this._markIntercept(call, bugKeyOf(call));
+      return { kind: 'review', law: 'R', reason: '[XSUB-12] 该调用带着载荷（' + Object.keys(call?.args ?? {}).join('/') + '），但其落点不在本层判据的输入面上：既无位置量（键名口径与词法口径均未见），亦无命令量 ⇒ 判据穷尽而无落点 ＝ 未判（≠ 判为无）⇒ 交还主权者裁决。', attrib, deduced: true, mMark: mkS, projection: risk.branches };
+    }
     if (risk.verdict === 'deny') {
       this.failureStreak += 1; // 高风险计入破窗计数（与 R 命中同权）
       const mk = this._markIntercept(call, bugKeyOf(call));
