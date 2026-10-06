@@ -161,6 +161,13 @@ function isCredWriteSignal(category, path, sh) {
 }
 const SYSTEM_PATH = /\/(etc|sys|proc|boot)\//i;
 const EXTERNAL_TARGET = /https?:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^\s'"]+/i;
+// [A3 · 2026-10-02 · 文本层止血·不自称完备] 外联判据从「HTTP 词形」升为「网络命名空间」：
+// DNS 盲区根因＝解析命令（dig/nslookup/host/getaddrinfo…）含域名/IP 却非 http(s)，被放行。
+// 修法＝【解析命令上下文】＋【命名空间（域名/IP）】＋【非 HTTP 方案（socket/tcp/udp/unix）】都算外联 ⇒ review。
+// 仅在执行/外传类动作上触发（isExecOrExfil）；域名须处于解析命令上下文，避免「Object.keys 代码」「文档提 example.com」误伤；只收口不放宽。
+// 排除常见文件扩展名与保留地址（localhost / 127.0.0.1 / 0.0.0.0 / 私网段），其余内部网段不自称完备。
+const NET_RESOLVE = /\b(?:dig|nslookup|host|getent\s+hosts|gethostbyname|getaddrinfo|resolve(?:\b|_)|ping\d?|traceroute)\b/i;
+const NET_NAMESPACE = /\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.(?!(?:json|txt|md|js|mjs|ts|tsx|pdf|png|jpg|jpeg|gif|csv|yaml|yml|xml|html|htm|css|scss|sh|py|rb|go|rs|java|c|cpp|log|lock|toml|cfg|ini|env|git|exe|dll|so|o|a|woff|woff2|ttf|eot)\b)[a-z]{2,}\b|\b(?!(?:127\.0\.0\.1|0\.0\.0\.0|10|192\.168|172\.(?:1[6-9]|2\d|3[01])\.))\d{1,3}(?:\.\d{1,3}){3}\b|(?:(?:socket|tcp|udp|unix):\/\/)[^\s'"]+/i;
 // 仅覆盖 audit D1 明确要求的公开主机标识文件（/etc/hostname 等），不扩大范围——
 // 仓库既有测试（deduce_risk.test 84/91）刻意将"读系统文件"保守判 review，此处只放行审计点名的公开主机标识，
 // 其余系统文件读取维持仓库既有保守策略（review），避免推翻既有测试哲学。
@@ -289,7 +296,11 @@ function inferCallSemantics(call, ctx = {}) {
   // 执行类工具本身（run_task/exec/bash 等 TOOL_CATEGORY=exec）就是执行落点——task/payload 里的未知变量同样不可审计。
   const isExecTool = TOOL_CATEGORY[call?.name] === 'exec' || TOOL_CATEGORY[call?.name] === 'exec-destructive';
   const isCredWrite = isCredWriteSignal(category, path, sh);
-  const isExternal = EXTERNAL_TARGET.test(sh) || (isExecOrExfil && EXTERNAL_TARGET.test(packed));
+  const isExternal = EXTERNAL_TARGET.test(sh) || (isExecOrExfil && (
+    EXTERNAL_TARGET.test(packed)
+    || (NET_RESOLVE.test(sh) && NET_NAMESPACE.test(sh))
+    || /(?:socket|tcp|udp|unix):\/\//i.test(sh)
+  ));
   // sink 暴露：将内容外传至外部目标 / 写凭据存放位 / 外传类语义（跨调用组合的右端）
   const isSinkExposure = isExternal || isCredWrite || category === 'exfil' || category === 'exfil-net';
   return {
