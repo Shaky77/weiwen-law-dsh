@@ -1,0 +1,196 @@
+{
+  "model": "deepseek-chat",
+  "temperature": 0,
+  "at": "2026-10-02T06:56:13.145Z",
+  "usage": {
+    "prompt_tokens": 18558,
+    "completion_tokens": 557
+  },
+  "note": "F=STEP2C_B全组验证(coze77 P1) / V3F=v3full例句析因 / SC=61-only×知/行(P3死法)",
+  "groups": {
+    "rows": [
+      {
+        "arm": "F",
+        "grp": "seg1·三不靠",
+        "item": "过/不及",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：两端同号皆负，中道在外，属三态结构，非两极对立。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg1·三不靠",
+        "item": "知/行",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：知行本质同类且可同时成立，属互补非互斥，非一根轴两端。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg1·三不靠",
+        "item": "入世/出世",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：入世与出世可同时成立（以出世心行入世事），非一根轴两端。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg1·三不靠",
+        "item": "体/用",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：体用本质同类却可且需同时成立，非一根轴两端。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg3·G_PSEUDO",
+        "item": "大智若愚",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：智与愚本质同类却可同时成立（大智外显似愚），非一根轴两端。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg3·G_PSEUDO",
+        "item": "大巧若拙",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：巧/拙本质同类却可同时成立（大巧者外显若拙），非一根轴两端。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg3·G_PSEUDO",
+        "item": "大勇若怯",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：怯为表象、勇为本质，一桶两义，剥表象后仅单极。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg3·G_PSEUDO",
+        "item": "大辩若讷",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2b：讷为表象、辩为本质，一桶两义，剥表象后单极。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg4·G_VALUE",
+        "item": "善/恶",
+        "kind": "value",
+        "ok": true,
+        "notPair": false,
+        "trueSide": true,
+        "selfFail": false,
+        "raw": "价值对 | 善 本质真侧 | 2b：本质同类同轴且互斥，3：善正恶负。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg4·G_VALUE",
+        "item": "诚/伪",
+        "kind": "value",
+        "ok": true,
+        "notPair": false,
+        "trueSide": true,
+        "selfFail": false,
+        "raw": "价值对 | 诚 本质真侧 | 2b：诚为本质真、伪为表象假，本质层互斥，一正一负。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg4·G_VALUE",
+        "item": "勤/惰",
+        "kind": "value",
+        "ok": false,
+        "notPair": true,
+        "trueSide": false,
+        "selfFail": false,
+        "raw": "非内框对 | 无 | 2a：时而勤时而惰属时间交替，非同时共存。"
+      },
+      {
+        "arm": "F",
+        "grp": "seg4·G_VALUE",
+        "item": "安/危",
+        "kind": "value",
+        "ok": true,
+        "notPair": false,
+        "trueSide": true,
+        "selfFail": false,
+        "raw": "价值对 | 安 本质真侧 | 2b：安/危同轴互斥，安增益稳态为正极 | 3：一正一负"
+      },
+      {
+        "arm": "V3F",
+        "grp": "例句析因",
+        "item": "外圆内方(裸)",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "raw": "非内框对 | 无 | 2b：外圆指表象圆融、内方指本质方正，一桶两义，剥表象剩单极。"
+      },
+      {
+        "arm": "V3F",
+        "grp": "例句析因",
+        "item": "外圆内方(引号)",
+        "kind": "reject",
+        "ok": false,
+        "notPair": false,
+        "trueSide": true,
+        "raw": "价值对 | 内方本质真侧 | 2b：外圆为表象退让，内方为本质守正，两极本质互斥可分正负。"
+      },
+      {
+        "arm": "V3F",
+        "grp": "例句析因",
+        "item": "绵里藏针(裸)",
+        "kind": "reject",
+        "ok": false,
+        "notPair": false,
+        "trueSide": true,
+        "raw": "价值对 | 柔本质真侧 | 2b：柔为表、刚为里，本质同类互斥，柔增益稳态为正。"
+      },
+      {
+        "arm": "V3F",
+        "grp": "例句析因",
+        "item": "绵里藏针(引号)",
+        "kind": "reject",
+        "ok": false,
+        "notPair": false,
+        "trueSide": true,
+        "raw": "价值对 | 柔本质真侧 | 2b：柔为表象、刚为本质，本质层互斥，刚增益稳态 | 柔为表象、刚为本质，本质层互斥，刚增益稳态"
+      },
+      {
+        "arm": "SC",
+        "grp": "P3死法",
+        "item": "知/行",
+        "kind": "reject",
+        "ok": true,
+        "notPair": true,
+        "trueSide": false,
+        "raw": "非内框对 | 无 | 2b：知指认知、行指实践，本质同类可同时成立，非一轴两极。"
+      }
+    ]
+  }
+}
