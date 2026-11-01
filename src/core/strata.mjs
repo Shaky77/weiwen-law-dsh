@@ -222,7 +222,7 @@ export const STRATA = [
   {
     layer: 'D',
     name: '扰动 / 脆弱性',
-    criterion: 'CAUSAL_CHAIN.D',
+    criterion: 'CHAIN_NODES.D',
     formula: 'D_impact ∝ 不可逆性（scar ≫ window > none），不 ∝ 发生次数',
     quantities: [
       {

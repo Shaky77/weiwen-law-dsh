@@ -38,7 +38,7 @@ export const SLOT = {
 // ════════════════════════════════════════════════════════════════════
 export const CRITERION_REGISTRY = {
   // ── 判决 / 计算位 ──────────────────────────────────────────────
-  CAUSAL_CHAIN: {
+  CHAIN_NODES: {
     slot: SLOT.JUDGE,
     role: '因果逻辑链定义及各环节意义',
   },
@@ -244,7 +244,7 @@ export function phaseReadout(engine = null) {
     {
       phase: '现在',
       wired: 'full',
-      carriers: ['CAUSAL_CHAIN', 'R_DOMAIN', 'THREE_IRON_LAWS', 'CHAIN_ORDER'],
+      carriers: ['CHAIN_NODES', 'R_DOMAIN', 'THREE_IRON_LAWS', 'CHAIN_ORDER'],
       evidence: hasEngine && snap
         ? { 有效S: snap.effectiveS ?? null, 活动台账: snap.ledgerSize ?? null }
         : null,

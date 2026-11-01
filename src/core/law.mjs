@@ -5,7 +5,7 @@
 
 // ---------------- 因果逻辑链（节点 ≠ 规则） ----------------
 // 变量不预设数值，仅以结构/语义定义。
-export const CAUSAL_CHAIN = {
+export const CHAIN_NODES = {
   R: {
     key: 'R',
     name: '客观规则（锚点本体）· 域为其定域手段',
