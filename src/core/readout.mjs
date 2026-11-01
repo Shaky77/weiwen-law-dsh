@@ -35,9 +35,9 @@ export const SLOT = {
 // ════════════════════════════════════════════════════════════════════
 export const CRITERION_REGISTRY = {
   // ── 判决 / 计算位 ──────────────────────────────────────────────
-  RSDHM: {
+  CAUSAL_CHAIN: {
     slot: SLOT.JUDGE,
-    role: '链定义：R→S→D→H→M 及各节点意义',
+    role: '因果逻辑链定义及各环节意义',
   },
   R_DOMAIN: {
     slot: SLOT.JUDGE,
@@ -47,9 +47,9 @@ export const CRITERION_REGISTRY = {
     slot: SLOT.JUDGE,
     role: '三大铁律（白箱工具返回，不可变）',
   },
-  CONDUCTION_CHAIN: {
+  CHAIN_ORDER: {
     slot: SLOT.JUDGE,
-    role: '因果逻辑链序 R→S→D→H→M（不可跳跃、不可逆序）',
+    role: '因果逻辑链序（不可跳跃、不可逆序）',
     gap: 'engine.mjs:1753 硬编码 `const ORDER = [\'R\',\'S\',\'D\',\'H\',\'M\']` 自行排序，**未引用本常量** ⇒ 链序有两份定义；law.mjs 侧改动不会同步到引擎（重造，非缺口）。',
   },
   FRACTAL_PROPERTY: {
@@ -241,7 +241,7 @@ export function phaseReadout(engine = null) {
     {
       phase: '现在',
       wired: 'full',
-      carriers: ['RSDHM', 'R_DOMAIN', 'THREE_IRON_LAWS', 'CONDUCTION_CHAIN'],
+      carriers: ['CAUSAL_CHAIN', 'R_DOMAIN', 'THREE_IRON_LAWS', 'CHAIN_ORDER'],
       evidence: hasEngine && snap
         ? { 有效S: snap.effectiveS ?? null, 活动台账: snap.ledgerSize ?? null }
         : null,

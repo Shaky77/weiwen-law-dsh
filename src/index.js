@@ -1061,7 +1061,7 @@ function apply(ctx) {
 
   registerSelfAuditTool(defineTool({
     name: 'list_rigid_anchors',
-    description: '列出 RSDHM 中 R 刚性锚点的当前生效定义，供模型校准方向、自查是否越界。',
+    description: '列出刚性锚点的当前生效定义，供模型校准方向、自查是否越界。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
@@ -1075,7 +1075,7 @@ function apply(ctx) {
 
   registerSelfAuditTool(defineTool({
     name: 'query_conduction_chain',
-    description: '返回因果逻辑链顺序 R→S→D→H→M 与框架要义，并回显**最近一次裁决的实际链落点**（每节读数与判词），供模型理解闭环结构并自查本次判定依据。',
+    description: '返回因果逻辑链顺序与框架要义，并回显**最近一次裁决的实际链落点**（每节读数与判词），供模型理解闭环结构并自查本次判定依据。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
@@ -1249,13 +1249,13 @@ function apply(ctx) {
       };
     },
   }));
-  // ── 五层推演读数（R→S→D→H→M，逐层给「可代入量」）──────────────────
+  // ── 分层推演读数（逐层给「可代入量」）──────────────────
   //   来由（安 2026-10-20）：公式若只是形容词，就一次也用不上。
   //   ⇒ 每层先算一个量，结论＝量之间的关系；算不出的量显式落「待取证／未实现」并带线索。
   //   ⚠️ 只读：不产生 verdict、不写状态、不进闸门。
   registerSelfAuditTool(defineTool({
     name: 'query_strata',
-    description: '五层推演读数（只读）：按 R→S→D→H→M 逐层返回「可代入的量」及其值，每层附公式与「在哪停」。三态显式：ok（现在能算）／pending（缺常数或取证，带 TBD 线索）／absent（实现层没有这个量）。另返回跨层代入禁令（如 ΣS 与 S_now 聚合方向相反、不可互代）。R 层另给域容量面：p_max（已取证的标准值）／N_opp（分母，engine 现缺）／R₀（=p×N）／rCapRoute（该域该走哪条公式），并附域表体检 rcap（把「条目非法 malformed」与「标准合法不给数 no_num_legal」分开计数）。不改变任何放行/拦截判决。',
+    description: '分层推演读数（只读）：逐层返回「可代入的量」及其值，每层附公式与「在哪停」。三态显式：ok（现在能算）／pending（缺常数或取证，带 TBD 线索）／absent（实现层没有这个量）。另返回跨层代入禁令（如 ΣS 与 S_now 聚合方向相反、不可互代）。R 层另给域容量面：p_max（已取证的标准值）／N_opp（分母，engine 现缺）／R₀（=p×N）／rCapRoute（该域该走哪条公式），并附域表体检 rcap（把「条目非法 malformed」与「标准合法不给数 no_num_legal」分开计数）。不改变任何放行/拦截判决。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {

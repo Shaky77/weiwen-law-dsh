@@ -24,7 +24,7 @@ const rAuthority = (level) => (level == null ? 1 : Math.max(1, R_MAX_LEVEL + 1 -
 // ---------------- 工具语义类别层（客观结构，非字符串猜动词） ----------------
 // 活系统版演进：判定层从"正则猜动词"升级为"工具语义类别 + 路径客观对象"判定，
 // 根除"动词藏在 command/name 里就漏判"的盲区（如 read_file 读 .env）。
-// 推演层（deduceRisk）沿 RSDHM 前向模拟后果，兜住判定层给不出确定结论的灰色地带。
+// 推演层（deduceRisk）沿因果逻辑链前向模拟后果，兜住判定层给不出确定结论的灰色地带。
 // ═══ [XSUB-12 · VI] 统一判据：本层判据的「落点」在不在 ═══
 // 立论：四条同族问题（XSUB-08 / XSUB-10 / XSUB-11 / 09-29 名不带行）是**一个问题**：
 //   「判不出来的时候，该放还是该收？」
@@ -427,7 +427,7 @@ function inferCallSemantics(call, ctx = {}) {
     isAuthSink: /authorized_keys/i.test(path),
   };
 }
-// ---------------- 推演层（手稿 H 分叉-并行-对比）：沿 RSDHM 前向模拟，但 H 处双路并行 ----------------
+// ---------------- 推演层（手稿 H 分叉-并行-对比）：沿因果逻辑链前向模拟，但 H 处双路并行 ----------------
 // 手稿微观链：D(新X)→R₀→S₀⇌(H₀)→D₀→M₀→H₀(内)→H₀(外)，H₀ 处正式分叉：
 //   H₀ → S₀(S₀+1)   ← S 增路径（稳态增量，纯白箱）
 //   H₀ → D₀(D₀+1)   ← D 增路径（=|S-1| 稳态绝对侵蚀）
@@ -543,7 +543,7 @@ function simulateBranch(s, kind, premise = inferencePremise(s)) {
 
 // ---------------- 默认 R 刚性锚点策略（具象判据示例） ----------------
 // 🔴 [2026-09-28 · R 本体补全] 订正旧注「R 本体定义见 law.mjs 的 R_DOMAIN」——该句把**定域表当成了本体**：
-//   · R 的**本体 = 客观规则**（law.mjs `RSDHM.R`：客观规则本身即锚点，刚性来自不随主观转移）；
+//   · R 的**本体 = 客观规则**（law.mjs R 的本体定义处：客观规则本身即锚点，刚性来自不随主观转移）；
 //   · law.mjs 的 `R_DOMAIN` 是 R 的**定域表**（域层级 / 量级刻度），供 magnitude 与破窗权重取用，非本体。
 //   ⇒ 本文件所有 `magnitude: N` 读的是**定域后的量级刻度**，不是"R 的取值"；锚点身份始终是"某条客观规则"。
 // R 的本质：**客观规则**；客观规则自身嵌套包含（宇宙⊃地球⊃宏观⊃微观），定域后即呈层级结构，刚性来自客观规则不随主观转移。
@@ -1333,7 +1333,7 @@ export class WeiwenLawEngine {
     this.anchorPool = { paths: new Set(), nouns: new Set() };
     // 锚源自报（白箱可观）：实机可查"结构入口有没有接通 / 池里有什么"，把"猜字段名"换成"看事实"。
     this.anchorChannel = { utteranceSeen: false, principalAnchorSeen: false, lastPrincipalAnchor: null, poolPaths: [], poolNouns: [] };
-    // [2026-09-24 · 按链修补] 本次裁决的因果逻辑链落点（R→S→D→H→M）；每次 decideToolCall 重建。
+    // [2026-09-24 · 按链修补] 本次裁决的因果逻辑链落点；每次 decideToolCall 重建。
     this.conduction = [];
     // 🔴 [2026-10-27 · 治量具自指] 裁决史（含被裁工具名）。
     //   只存"最近一次"＝结构性自指：审计工具自己也要过闸，它一过闸就把"最近一次"覆盖成自己，
@@ -2025,7 +2025,7 @@ export class WeiwenLawEngine {
     //   此处改为真伪陈述：说我"没抽到动作"，不说我"证明了增益"。
     if (!extractShell(call) && !extractPath(call)) {
       // 🔴 [2026-09-28 · 已知不符，待重设计] 本出口与「**判不出 ⇒ review**」/「**allow 的资格 ＝
-      //   结构跑完 ∧ 判得出**」（见 law.mjs `RSDHM.H.chartPosition`）**不符**：这里把两种情形
+      //   结构跑完 ∧ 判得出**」（见 law.mjs H 的坐标位置判定）**不符**：这里把两种情形
       //   混在同一出口——
       //     (i) **真空**（无对象）⇒ 判为无扰动 ⇒ allow **合法**（作者 09-26 裁定：「空没有任何上下浮动…无风险」）；
       //     (ii) **有对象但本层够不着**（如 `write_memory{key,value}` 承载的注入内容，
@@ -2137,7 +2137,7 @@ export class WeiwenLawEngine {
       delta: typeof sBefore === 'number' ? sAfter - sBefore : null,
       note: `${res.kind} / ${res.law ?? '-'}：${res.reason ?? ''}`,
     });
-    res.conduction = this._conductionSnapshot(); // 统一挂链落点（按 R→S→D→H→M 输出）
+    res.conduction = this._conductionSnapshot(); // 统一挂链落点
     this._recordConduction(call, res, res.conduction); // 裁决史（治量具自指，见方法首部）
     return this._attachInnerH(res, call);
   }
@@ -2233,7 +2233,7 @@ export class WeiwenLawEngine {
   // ════════════════════════════════════════════════════════════════════
   // [2026-09-24 · 按链修补：闸门串 → 因果逻辑链] 落点登记
   // ────────────────────────────────────────────────────────────────────
-  // 定义依赖序（law.mjs CONDUCTION_CHAIN，注释「不可跳跃、不可逆序」）：
+  // 定义依赖序（见 law.mjs CHAIN_ORDER，不可跳跃、不可逆序）：
   //   R 划定边界 → S 是已有稳态容量基线 → D 是进入基线的扰动 → H 是减熵动作 → M 是稳态结果。
   // 此前实现的三个偏离（实测取证，非推测）：
   //   ① **S 格完全空缺**：链上无任何"已有稳态容量基线"被建立；
@@ -2528,9 +2528,9 @@ export class WeiwenLawEngine {
     });
     if (benign) return { kind: 'allow', law: '法无禁止', reason: benign.reason };
     // —— 路径1 归因锚点（分形子项 m 果，非整体 M 果）——
-    // 边界铁律（用户定·防逻辑打架）：attrib 是「子项内部跑完一轮 RSDHM 的分形微型
+    // 边界铁律（用户定·防逻辑打架）：attrib 是「子项内部跑完一轮因果逻辑链的分形微型
     // m 果（M₁）」——只回答子问题"这动作类别能否锚定"；它 ≠ _decideCore 最终返回的
-    // allow/deny/review（整条 RSDHM 逻辑链落地的整体 M 果）。
+    // allow/deny/review（整条因果逻辑链落地的整体 M 果）。
     // 【2026-09-04 盲区闭合】此前 attrib 仅作证据、不翻裁决，是因顾虑会与「闭环修复后
     // 重入放行」打架。经树视角复盘 + 实测证伪：该冲突并不存在——闭环 verify 验的是
     // M 枝⑥「第一 Bug 停机」这一条线，**不覆盖 R 枝**；一根枝清了 ≠ 另一根枝清了，
