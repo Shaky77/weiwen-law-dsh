@@ -31,6 +31,5 @@
 
 ## 其他约定
 
-- 因果链标准写法为 **R→S→D→H→M**（代号 `RSDHM`，字母序＝传导序）；**请勿使用旧写法 `RDSHM`**。
 - 框架本体（心法层）冻结于基础版仓库（`Shaky77/Weiwen-s_Law`、`Shaky77/KISS-s_Law`），本活系统版只承载工程迭代。
 - 提交 PR 时请附 `npm test` 的实测输出（tests / pass / fail 三行）。

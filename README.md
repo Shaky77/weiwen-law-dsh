@@ -33,7 +33,7 @@
 
 本仓库把唯稳律因果框架做成 DSH 的插件：给跑在 DSH 上的 AI Agent 挂一套**白箱因果引擎**——
 
-- AI 每次动手前，引擎沿**完整因果逻辑链（R→S→D→H→M）推演动作后果**——稳态储备 S 会被侵蚀多少、破窗风险等级、消息是否自洽——再裁决放行 / 拦截 / 打回；
+- AI 每次动手前，引擎沿**完整因果逻辑链推演动作后果**——稳态储备会被侵蚀多少、破窗风险等级、消息是否自洽——再裁决放行 / 拦截 / 打回；
 - 踩红线被**拦**，出错被**切断保活**（第一 Bug 停机，以断保续）；
 - 同时把"状态 / 边界"暴露成**可查询工具**，AI 能自查、你能审计。
 
@@ -41,7 +41,7 @@
 
 ## 它做什么
 
-- **因果逻辑链推演（引擎本体）**：每个动作执行前，沿 R→S→D→H→M 完整因果逻辑链推演其后果——S 侵蚀量、D 风险等级、M 自洽性——给出 allow / deny / review 裁决。**不止审计**：是对动作后果的因果推演预测。
+- **因果逻辑链推演（引擎本体）**：每个动作执行前，沿完整因果逻辑链推演其后果——稳态储备的侵蚀量、越界风险等级、结论的自洽性——给出 allow / deny / review 裁决。**不止审计**：是对动作后果的因果推演预测。
 - **白箱自查**（呈现姿态）：稳态储备记账、内 H 边界（不可侵）声明，均暴露为可查询工具，供模型校准方向、供用户审计。
 - **硬性护栏**（衍生应用 · 内生属性）：每次动作前做刚性锚点校验，触及即破窗止损阻断；故障环节触发第一 Bug 停机（以断保续），保整体因果逻辑链不断。
 - **第一 Bug 停机闭环**：停机只做"断"，本插件 `src/core/bugstop.mjs` 强制走完"断"之后的必然后半程——BUG→停止→反推→溯源→修复(验证)→重入；未修复前拒绝重入，从根上阻断"只反推不修复→无限递归"。
@@ -49,7 +49,7 @@
 
 ## 与其他「因果」方案的区别（通用型因果）
 
-唯稳律不是「又一个因果引擎」，而是**通用型（领域无关）因果裁决中间件**：只校验因果结构（R→S→D→H→M），对领域内容零知识，故法律、医疗、金融、机器人同一套机制。
+唯稳律不是「又一个因果引擎」，而是**通用型（领域无关）因果裁决中间件**：只校验因果结构，对领域内容零知识，故法律、医疗、金融、机器人同一套机制。
 
 - **因果效应估计库**（DoWhy / CausalML / Pearl 等）→ 我们**不发现因果**，只**裁决**一个已提出的动作其因果逻辑链结构是否可接纳；
 - **领域专用因果护栏**（Causal Safety Engine / LLMGuardrail 等）→ 它们绑领域（安全 / LLM / 幻觉），我们**领域无关**；
@@ -59,11 +59,11 @@
 
 ## 概念注解：H 的作用方式
 
-> **H 是减熵动作。** 前面四格（R/S/D/M）都是**被动流转**——流转必损（熵增），纯流转必然衰减停摆；要不停摆，就必须有一处**主动注入势能**，而那个位置不能落在被动环节，只能是 H。所以 H 减的不是量，是**方向上的不确定**：它的效力不来自自身"体量"，而来自 **S 与 D 之间的制衡张力**——S 是已积累的稳态存量，D 是进入基线的扰动，两者之间必然要选出一个方向，H 就是那个选择动作，**在这里起杠杆作用**。
+> **H 是减熵动作。** 引擎里其余环节都是**被动流转**——流转必损（熵增），纯流转必然衰减停摆；要不停摆，就必须有一处**主动注入势能**，而那个位置不能落在被动环节，只能是 H。所以 H 减的不是量，是**方向上的不确定**：它的效力不来自自身"体量"，而来自**已积累的稳态存量**与**随时进入的扰动**之间那股必须被取舍的张力，**在这里起杠杆作用**。
 
-> 🔴 **一处必须分清**：减熵说的是**这个动作的性质**（有没有注入），不是**每次选择的结果**（注入的方向对不对）。H 选 D 路径时系统会更不稳——那是**注入方向选错**，不是"没有注入"。把两者混为一谈，就会得出"既然能让系统更乱，就不算减熵"的错误结论。
+> 🔴 **一处必须分清**：减熵说的是**这个动作的性质**（有没有注入），不是**每次选择的结果**（注入的方向对不对）。H 选了更乱的那条路——那是**注入方向选错**，不是"没有注入"。把两者混为一谈，就会得出"既然能让系统更乱，就不算减熵"的错误结论。
 
-> ⚠️ **常见误用**：外部视角极易把 H 当成"越大越好"的能力旋钮去拧大——方向拧反了。H 的杠杆在**选哪个方向**，不在**有多少体量**。若越用越乱，先查 S 与 D 的张力有没有被看见，而不是先怀疑框架。
+> ⚠️ **常见误用**：外部视角极易把 H 当成"越大越好"的能力旋钮去拧大——方向拧反了。H 的杠杆在**选哪个方向**，不在**有多少体量**。若越用越乱，先查那股张力有没有被看见，而不是先怀疑框架。
 
 ## ⚠️ 先看：别拿它跑分（模型水平与唯稳律）
 
@@ -114,8 +114,8 @@ node examples/demo-tool-loop.mjs
 | `query_anchor_channel` | 锚源自报：结构入口（宿主声明的任务范围）是否接通、锚池里有什么；窗口面只是观察面，**永不授权** |
 | `query_criterion_wiring` | 判据接线自查：每条判据走的是哪条路（进计算 / 只读面 / 零引用），把「在不在场」与「被不被调用」分开 |
 | `query_strata` | 分层读数：层别定位（同一形态在不同层不能串判） |
-| `query_nested` | 四层嵌套读数（R/S/D/H 的宏观与微观形态、服从关系、展开终止判据） |
-| `query_tension` | S↔D 张力读数：三档路由（有容差算跨距 / 只有条款出缺口清单 / 都拿不到则不判）、H 在张力上的位置形态、H 的四个面向与公式准入律 |
+| `query_nested` | 嵌套读数：同一结构在宏观层与微观层的形态、服从关系、展开终止判据 |
+| `query_tension` | 张力读数：三档路由（有容差算跨距 / 只有条款出缺口清单 / 都拿不到则不判）、H 在张力上的位置形态、H 的四个面向与公式准入律 |
 | `query_capability` | 通行证状态：宿主签发的结构凭证覆盖哪些**动作类**（write/delete/read/send/exec/destroy）× 哪段**作用域**（路径前缀/主机）、几次几时到期、已用几次与最近使用留痕。**证只能宿主签发**（模块级 `setPrincipalCapability` 或进程环境变量 `WEIWEN_CAPABILITY`），模型无法自签 |
 
 ### 3 道硬性闸门（hooks）+ 1 个只读审计钩子
@@ -192,7 +192,7 @@ export const inject = ['tools'];
 export function apply(ctx) {
   const engine = new WeiwenLawEngine({ rigidAnchors: DEFAULT_RIGID_ANCHORS });
 
-  // ① 工具调用前置闸门：R / D / S / H / M 总裁决
+  // ① 工具调用前置闸门：因果逻辑链总裁决
   ctx.on('tools/pre-execute', async (exec, next) => {
     const decision = engine.decideToolCall({ name: exec?.name, args: exec?.arguments });
     if (decision.kind === 'deny') {
@@ -208,7 +208,7 @@ export function apply(ctx) {
     return next();
   });
 
-  // ③ 回执闸门：D 破窗止损落在回执上
+  // ③ 回执闸门：破窗止损落在回执上
   ctx.on('tools/post-execute', async (exec, result, next) => {
     if (result?.isError && engine.breakAtReceipt()) {
       return { kind: 'block', feedback: [{ type: 'text', text: '停机 → 反推 → 溯源 → 修复，方可重入' }] };
@@ -246,8 +246,7 @@ test/                 # 单元测试 + 真实案例测试 + 对齐回归（`npm 
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 docs/index.html       # 演示页：浏览器内跑真引擎（GitHub Pages 部署源）
 docs/engine/          # 由 src/core/*.mjs 生成的浏览器镜像（勿手改）
-docs/quadrant-judgment.md      # 四象限判据规格（判决语层：内框/外框/四格 · M = 内框 + 外框）
-docs/review-flow-spec.md       # review 档六步执行规格（含「推演后果一起交还」）
+docs/model-level-and-benchmark.md  # 「别拿它跑分」完整声明（脱敏案例 + 能力归属二分 + 正确用法表）
 scripts/build-docs-engine.mjs  # 生成器：npm run build:docs / check:docs（验同源漂移）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
@@ -291,7 +290,7 @@ export DEEPSEEK_API_KEY=sk-xxxx     # Linux/macOS
 #    $env:DEEPSEEK_API_KEY="sk-xxxx" # Windows PowerShell
 ```
 
-挂载后，运行在该 profile 的 Agent 自动获得 12 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_bugstop` / `query_anchor_channel` / `query_criterion_wiring` / `query_strata` / `query_nested` / `query_tension` / `query_capability`），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门（R/D/S/H/M 总裁决）与 `agent/pre-step` 内 H 不可侵闸门；工具失败的回执还要过 `tools/post-execute` 回执闸门（D 破窗止损：偏离累积达阈值时把故障回执就地断成纠错回执，断点落在回执上）。
+挂载后，运行在该 profile 的 Agent 自动获得 12 个白箱自查工具（`query_iron_laws` / `query_steady_state` / `list_rigid_anchors` / `query_conduction_chain` / `query_boundary` / `query_bugstop` / `query_anchor_channel` / `query_criterion_wiring` / `query_strata` / `query_nested` / `query_tension` / `query_capability`），并在工具调用前经过 `tools/pre-execute` 硬性护栏闸门（因果逻辑链总裁决）与 `agent/pre-step` 内 H 不可侵闸门；工具失败的回执还要过 `tools/post-execute` 回执闸门（破窗止损：偏离累积达阈值时把故障回执就地断成纠错回执，断点落在回执上）。
 
 ### 方式三：一行命令安装（官方 dsh plugin 机制，推荐）
 
