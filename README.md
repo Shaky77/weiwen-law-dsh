@@ -1,8 +1,9 @@
 # dsh-weiwen-law
 
-> 📦 **npm 发布源**｜包名 `dsh-weiwen-law`｜当前稳定版 **0.2.15**
+> 📦 **npm 发布源**｜包名 `dsh-weiwen-law`
 >
-> 本仓是 [npm 包 `dsh-weiwen-law`](https://www.npmjs.com/package/dsh-weiwen-law) 的发布来源，仓库内容与已发布版本一致。安装：`npm i dsh-weiwen-law`。
+> 本仓是 [npm 包 `dsh-weiwen-law`](https://www.npmjs.com/package/dsh-weiwen-law) 的发布来源。安装：`npm i dsh-weiwen-law`。
+> **本线已冻结**：不再新增版本，仓库内容保持在最后发布的状态。
 
 > ✅ **已收录**：[dsh-plugin-radar（awesome-dsh-plugins）](https://github.com/AdamPlatin123/dsh-plugin-radar) 登记 PR [#403](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/403) 已于 **2026-08-31** 合并，`PLUGINS.md` 实测在榜（判定档位：**待测**——升「运行级可用」待雷达下次自动扫描刷新数据快照）。
 
