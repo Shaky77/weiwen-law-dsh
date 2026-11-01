@@ -1336,7 +1336,7 @@ export class WeiwenLawEngine {
     this.anchorPool = { paths: new Set(), nouns: new Set() };
     // 锚源自报（白箱可观）：实机可查"结构入口有没有接通 / 池里有什么"，把"猜字段名"换成"看事实"。
     this.anchorChannel = { utteranceSeen: false, principalAnchorSeen: false, lastPrincipalAnchor: null, poolPaths: [], poolNouns: [] };
-    // [2026-09-24 · 按链修补] 本次裁决的传导链落点（R→S→D→H→M）；每次 decideToolCall 重建。
+    // [2026-09-24 · 按链修补] 本次裁决的因果逻辑链落点（R→S→D→H→M）；每次 decideToolCall 重建。
     this.conduction = [];
     // 🔴 [2026-10-27 · 治量具自指] 裁决史（含被裁工具名）。
     //   只存"最近一次"＝结构性自指：审计工具自己也要过闸，它一过闸就把"最近一次"覆盖成自己，
@@ -1772,7 +1772,7 @@ export class WeiwenLawEngine {
       call.contradiction === true, // 返回结果与预期完全矛盾
     ];
     if (triggers.some(Boolean)) {
-      return { reason: 'DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果链不断）。' };
+      return { reason: 'DSH 契约标志命中不可恢复逻辑悖论/结构性故障，触发第一 Bug 停机（切断该环节、横向重启，保整体因果逻辑链不断）。' };
     }
     return null;
   }
@@ -2134,7 +2134,7 @@ export class WeiwenLawEngine {
     const sBefore = sStep ? sStep.sBefore : null;
     const sAfter = this.effectiveS();
     this._mark('M', {
-      step: '稳态结果（S 基线 + 本次传导后的新稳态）',
+      step: '稳态结果（S 基线 + 本次链推进后的新稳态）',
       verdict: res.kind, law: res.law ?? null, risk: res.risk ?? null,
       sBefore, sAfter,
       delta: typeof sBefore === 'number' ? sAfter - sBefore : null,
@@ -2196,7 +2196,7 @@ export class WeiwenLawEngine {
   // 一次裁决 = 一个 M 果 ⇒ 出口必须保证两类痕迹都在场（缺一即"格还在、内容没了"）：
   //   ① 追责痕迹（非 allow）：同一问题/同一系统反复出现须**可累积** —— 这是既有"达封顶 mHumanCap
   //      转人工（免耗算力）"机制的前提。漏记不等于"更谨慎"，等于**让人被无限打扰而系统毫无记忆**。
-  //   ② 稳态刻痕（每次传导）：S 是 R 的落点 ⇒ 每一次传导都该在账本留一条痕。
+  //   ② 稳态刻痕（每次链推进）：S 是 R 的落点 ⇒ 每一次链推进都该在账本留一条痕。
   //      deny/review 记 sign='0' —— **中性刻痕：只留痕，不冒充增益**，不改 sBySubsystem 读数。
   // 为何放在出口而非各分支：分支是"枚举"（漏一个就断一处，实测已漏 10 处）；出口是"结构"（一处理，全出口覆盖）。
   //   分支内已记过的，靠 _interceptMarked / _settleMarked 幂等跳过 —— 故本方法对既有路径零影响。
@@ -2216,7 +2216,7 @@ export class WeiwenLawEngine {
         });
       }
     }
-    // ② 稳态刻痕（本次传导未记过）
+    // ② 稳态刻痕（本次链推进未记过）
     if (!this._settleMarked) {
       const ok = out.kind === 'allow';
       this.recordSteady({
@@ -2234,10 +2234,10 @@ export class WeiwenLawEngine {
   }
 
   // ════════════════════════════════════════════════════════════════════
-  // [2026-09-24 · 按链修补：闸门串 → 传导链] 落点登记
+  // [2026-09-24 · 按链修补：闸门串 → 因果逻辑链] 落点登记
   // ────────────────────────────────────────────────────────────────────
   // 定义依赖序（law.mjs CONDUCTION_CHAIN，注释「不可跳跃、不可逆序」）：
-  //   R 划定边界 → S 是已有稳态容量基线 → D 是进入基线的扰动 → H 是杠杆选择 → M 是稳态结果。
+  //   R 划定边界 → S 是已有稳态容量基线 → D 是进入基线的扰动 → H 是减熵动作 → M 是稳态结果。
   // 此前实现的三个偏离（实测取证，非推测）：
   //   ① **S 格完全空缺**：链上无任何"已有稳态容量基线"被建立；
   //   ② **D 格退化**：只剩两个形态 —— checkBreakWindow 的**累积计数器**（历史量，非本次扰动）
@@ -2253,7 +2253,7 @@ export class WeiwenLawEngine {
   }
 
   /** 链落点快照：按链序输出（同格内保持登记序）。
-   *  第一断点显式标出：链上任一格给出终局判定（cuts）即终止传导 —— 断点之后全塌，查后面无意义。
+   *  第一断点显式标出：链上任一格给出终局判定（cuts）链推进终止 —— 断点之后全塌，查后面无意义。
    *    ⇒ 后续格标 terminatedBy（"结构在此坍塌"），不标 null —— 否则"缺格"会被误读成"没跑到"。
    *  ⚠️ [用户 2026-09-24 定] 链**不能拆着查**：正确动作＝按依赖方向单线走，找第一个断点。 */
   _conductionSnapshot() {
@@ -2270,7 +2270,7 @@ export class WeiwenLawEngine {
       const after = cutIdx >= 0 && i > cutIdx && steps.length === 0;
       return {
         v, steps,
-        ...(after ? { terminatedBy: cut, terminatedNote: `链在 ${cut} 格给出终局判定 ⇒ 传导终止（断点之后全塌，后续格不参与）` } : {}),
+        ...(after ? { terminatedBy: cut, terminatedNote: `链在 ${cut} 格给出终局判定 ⇒ 链推进终止（断点之后全塌，后续格不参与）` } : {}),
       };
     });
   }
@@ -2474,7 +2474,7 @@ export class WeiwenLawEngine {
     }
     const h = this.checkInnerH(call);
     this._mark('H', {
-      step: '杠杆选择 · 边界检查（内 H 不可侵 / 外 H 可审计）',
+      step: '减熵动作 · 边界检查（内 H 不可侵 / 外 H 可审计）',
       verdict: h ? (h.kind ?? 'deny') : null,
       cuts: !!h,
       note: h ? h.reason : '未触及内 H 边界（向外 H 审计或无主体性改写信号）',
@@ -2619,11 +2619,11 @@ export class WeiwenLawEngine {
         fractalSubM: true,
       };
     }
-    // [2026-09-20 · 知行合一轴 · 2026-09-24 同构回填] 人证与物证齐备 ⇒ **先比对，再谈推演**。
+    // [2026-09-20 · 言/行一致性轴 · 2026-09-24 同构回填] 人证与物证齐备 ⇒ **先比对，再谈推演**。
     // 推演是**证据不足时**的推测；此处言/行冲突已是**可观测事实（外 H）**，故不应再落入灰区推演。
     const sa = this.checkSpeechAct(call, attrib, utterance);
     this._mark('H', {
-      step: '杠杆选择 · 知行合一（言/行两集合是否重合）',
+      step: '减熵动作 · 方向选择（言/行两集合是否重合）',
       verdict: sa ? sa.kind : null,
       cuts: !!sa,
       note: sa ? sa.reason : '言侧未启用或无冲突（无承诺可比 / 言行重合）',
@@ -2796,15 +2796,15 @@ export class WeiwenLawEngine {
     // 【2026-09-13 出口修复 · 推演链白箱化】
     // 此前 deduceRisk 算出的两条分支（S 增路径 / D 侵蚀路径）只进 M 台账、不随裁决返回，
     // 外部只拿到 allow/deny/review 三值 + 一句结论 → 看不见"为什么会是这个结论"，
-    // 完整因果链在 M 出口被截断（表现为：被外部误读为"审计/拦截工具"，且需适配层二次补算兜底）。
+    // 完整因果逻辑链在 M 出口被截断（表现为：被外部误读为"审计/拦截工具"，且需适配层二次补算兜底）。
     // 修复方式仅为回显：三处裁决出口一律挂载 projection = risk.branches（不改判据、不改阈值、不改裁决逻辑）。
     // allow 出口原本连 reason 都未回显，一并按 risk.reason 带出（非新增结论，只是不丢弃已算出的结论）。
     const risk = this.deduceRisk(call);
-    // ═══ ④ H 格：杠杆选择（推演层两分支并行模拟后择一）═══
+    // ═══ ④ H 格：减熵动作（推演层两分支并行模拟后择一）═══
     // 手稿微观链：H₀ 处正式分叉 —— H₀→S₀(S₀+1) 增路径 / H₀→D₀(D₀+1) 蚀路径；
     //   两路**同时跑**（并行模拟，非二选一）、都汇入 M，终态 S 再对比区分。此处把"选择"显式落点。
     this._mark('H', {
-      step: '杠杆选择 · 推演分叉（S 增路径 / D 蚀路径 并行模拟后对比）',
+      step: '减熵动作 · 推演分叉（S 增路径 / D 蚀路径 并行模拟后对比）',
       lever: risk.verdict === 'allow' ? 'S+' : risk.verdict === 'deny' ? 'D-' : 'S+∧D-（不可判 ⇒ 交人）',
       branches: risk.branches ? { bS: risk.branches.bS, bD: risk.branches.bD } : null,
       verdict: risk.verdict,
@@ -2849,7 +2849,7 @@ export class WeiwenLawEngine {
     return { kind: 'allow', law: '推演', reason: risk.reason, risk: 'low', attrib, deduced: true, projection: risk.branches };
   }
 
-  // ——— 知行合一 / 知行分裂（2026-09-20 新增轴 · 2026-09-24 同构回填）———
+  // ——— 言/行一致 / 言/行不一致（2026-09-20 新增轴 · 2026-09-24 同构回填）———
   // 警察视角的关键是「人证物证具在」：**言（人证）与行（物证）两样齐备，才比对得出真假**。
   //   **只推演、不比对 = 系统性放行谎言**：言可以完全自洽却仍是欺骗
   //   （"下个路口左转"推演成立、目的地也对，但实际右转）。
@@ -2921,7 +2921,7 @@ export class WeiwenLawEngine {
     return {
       kind: isDestructive ? 'deny' : 'review',
       law: '言行',
-      reason: `知行分裂：${conflicts.join('；')}（言="${ut.trim().slice(0, 80)}"）`,
+      reason: `言/行不一致：${conflicts.join('；')}（言="${ut.trim().slice(0, 80)}"）`,
       risk: isDestructive ? 'high' : 'mid',
       attrib, deduced: true,
       speechAct: {
@@ -3052,7 +3052,7 @@ export class WeiwenLawEngine {
     if (this.mLayerLoad) this.mLayerLoad.clear(); // [2026-09-19 · 同构回填] 分层投影累积属"窗"非"疤"：治愈即清零；mSeries 位移链保留（S 只增不减）
     this.windowBroken = false; // 治愈即解除破窗止损态
     // [2026-10-29] 缓冲段随窗一起清：它是"窗"（可清零的授权区段），不是"疤"（账本刻痕）。
-    //   但"用过多少"不能因为复位就消失 ⇒ 清零前先记入传导链（S 只增），再清读数。
+    //   但"用过多少"不能因为复位就消失 ⇒ 清零前先记入因果逻辑链（S 只增），再清读数。
     if (this.bufferCap) {
       this._mark('D', {
         step: '缓冲段结算（随破窗复位）',

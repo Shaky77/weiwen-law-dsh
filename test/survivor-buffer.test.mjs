@@ -128,6 +128,6 @@ test('复位清空缓冲段，但用量先留痕（S 只增，清的是窗不是
   assert.equal(e.windowBroken, false);
   assert.equal(e.bufferSnapshot().display, '未授予');
   const marks = e.conduction ?? [];
-  assert.ok(marks.length >= marksBefore, '复位不得丢掉传导链');
+  assert.ok(marks.length >= marksBefore, '复位不得丢掉因果逻辑链');
   assert.ok(marks.some((m) => /缓冲段结算/.test(m.step ?? '')), '复位前须留下用量刻痕');
 });

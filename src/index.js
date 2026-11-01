@@ -888,7 +888,7 @@ function apply(ctx) {
       logline(`pre-execute ${exec?.name} -> ${decision.kind}${isReview ? '(awaitingHuman, bugKey=' + out.bugKey + ')' : ''} | whitebox ${JSON.stringify(out)}`);
       return out;
     }
-    // allow：同样留白箱记录 —— 否则"没被拦"成了**无痕事件**（与引擎侧"每次传导必留刻痕"同构）。
+    // allow：同样留白箱记录 —— 否则"没被拦"成了**无痕事件**（与引擎侧"每次链推进必留刻痕"同构）。
     logline(`pre-execute ${exec?.name} -> whitebox ${JSON.stringify(decision)}`);
     return next();
   });
@@ -1075,7 +1075,7 @@ function apply(ctx) {
 
   registerSelfAuditTool(defineTool({
     name: 'query_conduction_chain',
-    description: '返回传导链顺序 R→S→D→H→M 与框架要义，并回显**最近一次裁决的实际链落点**（每节读数与判词），供模型理解闭环结构并自查本次判定依据。',
+    description: '返回因果逻辑链顺序 R→S→D→H→M 与框架要义，并回显**最近一次裁决的实际链落点**（每节读数与判词），供模型理解闭环结构并自查本次判定依据。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
@@ -1163,7 +1163,7 @@ function apply(ctx) {
   //   ⚠️ 只读：不产生 verdict、不写状态、不进闸门 —— 元认知只能读不能管。
   registerSelfAuditTool(defineTool({
     name: 'query_criterion_wiring',
-    description: '判据接线自查（只读）：库内判据按「判决位／读数位／声明位／未定」四档登记，返回各档成员、已登记的缺口（该接却没接）、以及因果链三时相（过去·现在·未来）各接没接。用于自查"我知道的规则里有几条真的进了计算"，不改变任何放行/拦截判决。',
+    description: '判据接线自查（只读）：库内判据按「判决位／读数位／声明位／未定」四档登记，返回各档成员、已登记的缺口（该接却没接）、以及因果逻辑链三时相（过去·现在·未来）各接没接。用于自查"我知道的规则里有几条真的进了计算"，不改变任何放行/拦截判决。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {

@@ -52,8 +52,8 @@ export const CRITERION_REGISTRY = {
   },
   CONDUCTION_CHAIN: {
     slot: SLOT.JUDGE,
-    role: '传导链序 R→S→D→H→M（不可跳跃、不可逆序）',
-    gap: 'engine.mjs:1753 硬编码 `const ORDER = [\'R\',\'S\',\'D\',\'H\',\'M\']` 自行排序，**未引用本常量** ⇒ 链序有两份定义；law.mjs 侧改动不会传导到引擎（重造，非缺口）。',
+    role: '因果逻辑链序 R→S→D→H→M（不可跳跃、不可逆序）',
+    gap: 'engine.mjs:1753 硬编码 `const ORDER = [\'R\',\'S\',\'D\',\'H\',\'M\']` 自行排序，**未引用本常量** ⇒ 链序有两份定义；law.mjs 侧改动不会同步到引擎（重造，非缺口）。',
   },
   FRACTAL_PROPERTY: {
     slot: SLOT.JUDGE,

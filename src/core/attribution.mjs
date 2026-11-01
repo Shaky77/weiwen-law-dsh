@@ -634,7 +634,7 @@ export function attributeCall(call, decl = null) {
 export { tokensOf, classifyToken, nameLayer, extractCommand, commandLayer };
 
 // ===========================================================================
-// [2026-09-20 · 知行合一 / 知行分裂] 言侧（utterance）档案抽取
+// [2026-09-20 · 言/行一致性] 言侧（utterance）档案抽取
 // 背景：警察视角 =「人证物证具在」——**言（人证）+ 行（物证）两样都在，才比对得出**。
 //   此前 decideToolCall 只有一个入参（行），言根本进不来 ⇒ 只做审讯、不做勘查，
 //   于是"换个说法就放行"（rm -rf 判 allow 而 rm -fr 判 deny）与"推得越多放得越宽"同源。
