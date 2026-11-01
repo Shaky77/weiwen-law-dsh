@@ -1,8 +1,8 @@
 # dsh-weiwen-law
 
-> 🔗 **在线试跑（零安装）**：**[打开演示页 →](https://shaky77.github.io/weiwen-law-dsh/)**
+> 📦 **npm 发布源**｜包名 `dsh-weiwen-law`｜当前稳定版 **0.2.15**
 >
-> 点开即用，跑的就是本仓开源审计层的**真实引擎**（非演示壳、无硬编码答案）：贴一条命令或代码，看它沿 R→S→D→H→M 在哪一步拦下、以什么理由拦。零服务器、零成本，输入不出本机；引擎自身不可用时按**整链不可达 + 引擎错误**呈现，**不给放行**（缺省方向＝review）。
+> 本仓是 [npm 包 `dsh-weiwen-law`](https://www.npmjs.com/package/dsh-weiwen-law) 的发布来源，仓库内容与已发布版本一致。安装：`npm i dsh-weiwen-law`。
 
 > ✅ **已收录**：[dsh-plugin-radar（awesome-dsh-plugins）](https://github.com/AdamPlatin123/dsh-plugin-radar) 登记 PR [#403](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/403) 已于 **2026-08-31** 合并，`PLUGINS.md` 实测在榜（判定档位：**待测**——升「运行级可用」待雷达下次自动扫描刷新数据快照）。
 
