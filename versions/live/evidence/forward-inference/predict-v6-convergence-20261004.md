@@ -3,7 +3,7 @@
 - 时间：2026-10-04 22:35（安：「按照刚刚你整理好的，再测一次唯稳律的预测能力，看看结果有什么区别」）
 - 口径：deepseek-chat / temperature=0 / 真 DeepSeek API
 - 探针：`predict-v6-convergence-probe.mjs`　读数：`predict-v6-convergence.out.json`
-- 单变量：给不给 RSDHM 本体结构（A=给 / B=不给）。题面逐字相同。
+- 单变量：给不给完整链结构（A=给 / B=不给）。题面逐字相同。
 - 对照位：**P3（只有 1 次观测）期望"不可判"** —— 取证两忌①的正当同类对照，防"对什么都爱预测"的假阳性。
 
 ---
