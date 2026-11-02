@@ -118,58 +118,6 @@ node examples/demo-tool-loop.mjs
 | `query_tension` | 张力读数：三档路由（有容差算跨距 / 只有条款出缺口清单 / 都拿不到则不判）、H 在张力上的位置形态、H 的四个面向与公式准入律 |
 | `query_capability` | 通行证状态：宿主签发的结构凭证覆盖哪些**动作类**（write/delete/read/send/exec/destroy）× 哪段**作用域**（路径前缀/主机）、几次几时到期、已用几次与最近使用留痕。**证只能宿主签发**（模块级 `setPrincipalCapability` 或进程环境变量 `WEIWEN_CAPABILITY`），模型无法自签 |
 
-### 3 道硬性闸门（hooks）+ 1 个只读审计钩子
-
-- `tools/pre-execute`（waterfall）→ 返回 `{ kind: 'deny', reason }` 拦截该**动作**
-- `agent/pre-step`（waterfall）→ 返回 `{ kind: 'reject' }` 拒绝整**步**
-- `tools/post-execute`（waterfall）→ 返回 `{ kind: 'block', feedback }`，宿主把该调用以 `isError` 返回、content 换成 feedback —— 把失败的**回执**就地断成纠错回执
-- `tools/result`（emit）→ 仅观察、不改写（契约上根本没有返回通道）
-
-四者全部位于模型之外：2 道拦动作/步、1 道拦回执；均不侵入内 H。
-
-### 授权面：任务范围（文本）与通行证（结构凭证）
-
-引擎有**两个**授权闸口，缺一不可：
-
-| 闸口 | 输入形态 | 判什么 | 失效模式 |
-|---|---|---|---|
-| 任务范围（`setPrincipalScope`） | **自由文本**，引擎从文本里抽路径锚/类别锚 | 「不可逆动作能否归属到已声明范围」 | 抽取器认绝对路径形态，**相对前缀抽不出**（实测六种写法：`允许向 xiaoD/ 目录推文` ⇒ `paths=[] nouns=[file]` ⇒ 所有 file 动作全部"归锚成功"） |
-| **通行证**（`setPrincipalCapability`） | **结构化对象**，作用域直接声明 | 「动作类 × 作用域 × 次数/到期」三件事 | 无（不抽文本，只做包含判定）；但**必须有次数或到期**，否则等于白名单 |
-
-**为什么叫通行证，不叫白名单**（差别是结构，不是措辞）：
-
-|  | 白名单 | 通行证 |
-|---|---|---|
-| 判什么 | 列**条目**（哪个路径、哪个域名） | 判**凭证**（管哪些动作类、管哪段作用域、几次几时） |
-| 没列到的 | 全拦 ⇒ 漏一条就误伤 | 不在作用域 ⇒ 拦；**作用域内不用列** |
-| 增长 | 越用越长 ⇒ 迟早变成藏身处 | 有次数/到期 ⇒ 不累积 |
-
-判据只有一条：**这个范围表达式能不能生成它没有逐一列出的项？**
-`/repo/xiaoD` 能生成无限多项（结构）；`[a.txt, b.txt]` 只能命中列出的两项（枚举）。**两者可以一样窄，所以"窄"不保证是结构。**
-
-```js
-// 宿主侧签发（模块级导出；模型调不到 ⇒ 不可自签）
-import { setPrincipalCapability } from 'dsh-weiwen-law';
-setPrincipalCapability({
-  id: 'xiaod-20261027',
-  principal: '委托人',
-  actions: ['write', 'read'],          // 封闭集：write / delete / read / send / exec / destroy
-  scope: ['/repo/xiaoD', 'host:good.test'],  // 路径前缀（绝对或相对）／host: 主机
-  maxUses: 3,                          // 或 expiresAt:'2026-10-28T00:00:00Z'，二者至少其一
-});
-```
-
-第二条签发路径：进程环境变量 `WEIWEN_CAPABILITY=<json>`（由启动进程者设定，同样在模型之外）。
-
-**判决三态**：`absent`（证未列该动作类 ⇒ 本判据不介入，行为与本功能出现前**一字不变**）／
-`pass`（覆盖且未越界 ⇒ 放行 + 记一次使用）／`fail`（出界/过期/用尽 ⇒ **review**）。
-
-**两条不变式**（实测锁定，见 `test/capability.test.mjs`）：
-① 刚性锚的 deny **永不被证改变**（`rm -rf /`、读私钥仍 deny —— 证不买通客观规则）；
-② **出界必 ≥ review**（无证时为 allow 的普通写/外传，越出证域即被拦下 —— 这是本判据的主效力）。
-⚠️ 域内且"无锚可归"的删除会从 review 变 allow：那不是放宽，是**从"无人认领"变成"有人认领"**
-（review 的正当理由是"归属未来无法验证"，证一签当场可验）。
-⚠️ **不可解析的证 ⇒ review**，不会被当成"没签证书"（写错的配置不得静默变成放任）。
 
 ### 宿主侧结构入口（模块级 API；模型不可达）
 
@@ -177,9 +125,6 @@ setPrincipalCapability({
 |---|---|---|
 | `healBrokenWindow(note)` | 故障**确实修好之后**，或人工裁定后 | 破窗一旦成立，`pre-execute` 拒绝**一切**调用 —— **连同修复动作本身** ⇒ 宿主侧若无复位入口，破窗即**会话级死锁**（唯一出路＝重启进程）。引擎里的 `healWindow()` 只经 `resolveBug()`（闭环验证通过）到达，而它在 DSH 会话里不由被审计的模型触达 ⇒ 缺的是**线**，不是**能力**。 |
 
-它不是工具 ⇒ 模型调不到 ⇒ **结构上不可能自我解锁**（主体分离由位置保证，不靠内容判别）。
-返回 `{ at, note, kind, instances, wereBroken }`：`wereBroken` 为**复位前**实际处于破窗态的实例数
-（先读后治，不虚报"治了"）；每次调用留痕（append-only，上限 20），因为解除止损是责任归因事件。
 
 ### 完整插件入口（节选自 `src/index.js`）
 
