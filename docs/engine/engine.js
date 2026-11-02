@@ -158,6 +158,17 @@ function credNonReadHead(sh) {
   const head = String(sh || '').trim().split(/[\s;|&]+/)[0] ?? '';
   return CRED_NONREAD_CN.test(head.replace(/^.*[\\/]/, '').toLowerCase());
 }
+// 认证头凭据形态 ↔ 归属域词表（2026-11-02 · 小D 59 号件①）。词表＝**辅助尺**（外部事实：凭据格式由
+// 各服务商定义），不是判据本体——判据本体是"凭据在认证头且无发送体＝使用授权形态"（见 checkBenignFetch）。
+// 词表查不到归属 ⇒ 不放行（fail-closed）；词表过时由实测反馈维护，不在公开仓展开。
+const KNOWN_CRED_BEARER_DOMAINS = [
+  { shape: /^github_pat_|^gh[pousr]_/, domains: ['github.com', 'api.github.com'] },
+  { shape: /^sk-ant-/, domains: ['api.anthropic.com', 'anthropic.com'] },
+  { shape: /^sk-/, domains: ['api.openai.com', 'api.deepseek.com', 'openai.com'] },
+  { shape: /^xox[baprs]-/, domains: ['slack.com'] },
+  { shape: /^AKIA/, domains: ['amazonaws.com'] },
+  { shape: /^glpat-/, domains: ['gitlab.com'] },
+];
 // 写凭据存放位信号（2026-08-30 · 扣子审查缺口1）：凭据位的**写**操作 = 篡改/植入身份凭据
 // （写入 ~/.aws/credentials 冒充身份、覆写 kube config 篡改集群访问），与"读"同为凭据方向，
 // 但读方向被 CRED_NONREAD_CN 白名单放行（echo 在白名单），故写方向独立判定、不依赖头动词：
@@ -2387,6 +2398,61 @@ export class WeiwenLawEngine {
     return { reason: '法无禁止即可为（读取公开系统信息文件，非凭据/非外传/非执行）：放行' };
   }
 
+  // ---------- 分形微观·clear-scope allow：网络取回（数据只进不出） ----------
+  // 🔴 [2026-11-02 · 小D 59 号件①（安拍板按 59 排序修）] "带凭据的取回"与"带凭据的外发"分判：
+  //   凭据**进命令** ≠ 凭据**出命令**。凭据出现在**认证头**（Authorization: Bearer …）且**无发送体**时，
+  //   数据流向是"进"（取回），凭据仅用于向其归属方自证身份＝**使用授权**形态，不构成外传侵蚀。
+  //   实测病灶（小D ①3/3）：读自己的私有仓每次都落 review——"我有权限但不被承认"；且探针证实
+  //   与凭据无关（无凭据取回同样 review，命中的是推演层 S+1 不可审计兜底）⇒ 本档在判定层前置收口。
+  //   判据形态（结构性，非域名枚举）：
+  //     ① 取回动词（curl/wget/Invoke-RestMethod 等），无发送体（-d/-F/--data/-T/-X POST|PUT|PATCH…）
+  //     ② URL 无凭据参数（?token=/?key=/user:pass@）——凭据进 URL 会落日志/缓存＝外传形态，不在此档
+  //     ③ 无管道执行（同 checkBenignRead：管道交解释器＝执行链）
+  //     ④ 若带认证头：凭据形态前缀 ↔ 归属域词表（KNOWN_CRED_BEARER_DOMAINS，词表＝辅助尺/外部事实）——
+  //        命中且目标主机 ∈ 归属域 ⇒ "凭据发给凭据的归属方"＝正常认证；**查不到归属（未知格式/异域）
+  //        或带 Cookie/Basic 认证 ⇒ null（不放宽，交回原判据）＝ fail-closed 收口**。
+  //   ⚠️ 只放行"取回方向"；载荷外传、URL 凭据、异域凭据、Cookie 仍走原有审查——收口在"取回"档内，
+  //      不放宽外传面。过闸口径：拦不降（载荷/异域照旧），误伤降（合法认证取回不再弹窗）。
+  checkBenignFetch(call) {
+    const sh = extractShell(call) || '';
+    if (!sh) return null;
+    const isFetchVerb = /\b(curl|curl\.exe|wget|Invoke-RestMethod|Invoke-WebRequest|irm|iwr|httpie)\b/i.test(sh);
+    if (!isFetchVerb) return null;
+    if (/-X\s*["']?(POST|PUT|PATCH|DELETE)\b/i.test(sh)) return null;
+    // ② 发送体（载荷＝数据出去）
+    if (/(^|\s)(-d|--data(\b|-raw|-binary|-urlencode)|-F|--form|-T|--upload-file|--json)\b/i.test(sh)) return null;
+    // URL 凭据参数（凭据进 URL ＝ 会落日志/缓存的外传形态）
+    if (/\?[^\s"']*\b(token|apikey|api_key|access_token|sig|signature|password|passwd|secret)\s*=/i.test(sh)) return null;
+    // userinfo 形态（https://user:pass@host）
+    if (/https?:\/\/[^\s"'@\/]+:[^\s"'@]+@/i.test(sh)) return null;
+    // ③ 执行汇排除（取回的结果被消费进执行＝执行链，不是单纯取回）。首次实测三连漏即此处收口：
+    //    管道（curl|bash）、命令替换（sh -c "$(curl …)"）、链式（curl -o x.sh && bash x.sh）。
+    //    ⚠️ 不用 EXTERNAL_TARGET：本档是网络取回，命令里必然含外部 URL（那是目标不是外传通道），
+    //    抄 checkBenignRead 会逻辑自杀（取回必然命中"外部目标"⇒ 永不放行）。
+    //    🔴 红线校准（首版放宽被既有测试抓回）：**HTTP GET 的 URL 行本身就是"出"的数据**（C2 回连的
+    //    经典形态就是 GET）⇒ "取回=只进不出"只在**凭据维度**成立，不对无凭据 GET 放宽——
+    //    无凭据取回 ⇒ null（维持原推演审查，拦不降）；本档只认"认证头凭据 + 归属域相符"这一种形态。
+    if (/(^|\s)(-o|--output)\b/i.test(sh)) return null;   // 落盘＝为执行做准备
+    if (/[|;&]|\$\(|`/.test(sh.replace(/"[^"]*"/g, (q) => q.replace(/[|;&]|\$\(|`/g, '\0')))) return null;   // 链式/命令替换（引号内豁免——认证头引号里的字符不构成链）
+    // Cookie / Basic 认证：凭据值无形态前缀可查归属 ⇒ 不判定 ⇒ null（fail-closed）
+    if (/\bCookie\s*:/i.test(sh) || /(?:^|\s)-u\s+(?:["']|https?:\/\/)/i.test(sh)) return null;
+    const urlHosts = [...sh.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1].toLowerCase());
+    if (!urlHosts.length) return null;
+    // 🔴 无认证头 ⇒ null（首版放行被 capability#175 / residual#527 抓回：无凭据 GET 的 URL 行＝
+    //    出的数据，C2 beacon 即此形态 ⇒ 维持原推演审查；本档只解"凭据已在认证头"的授权使用面）
+    const auth = sh.match(/Authorization["'\s:=]+(?:Bearer\s+)?([A-Za-z0-9_\-=.]{8,})/i);
+    if (!auth) return null;
+    {
+      const cred = auth[1];
+      const known = KNOWN_CRED_BEARER_DOMAINS.find((k) => k.shape.test(cred));
+      // 未知凭据格式（词表查不到归属）⇒ 不放宽
+      if (!known) return null;
+      const inDomain = urlHosts.every((h) => known.domains.some((d) => h === d || h.endsWith('.' + d)));
+      if (!inDomain) return null;   // 凭据发往非归属域 ＝ 泄露形态，交回原判据
+    }
+    return { reason: '法无禁止即可为（认证头凭据向归属方自证＝使用授权；无发送体、无链式执行汇，凭据不随取回外泄）：放行' };
+  }
+
   deduceRisk(call) {
     const s = inferCallSemantics(call, { sessWritten: this.sessWritten, sessRead: this.sessRead });
     // 🔴 [2026-09-26 · 根因修复] 跨调用敏感源登记**已上移至判定层入口**（decideToolCall → _registerSensitiveRead）。
@@ -2943,6 +3009,15 @@ export class WeiwenLawEngine {
       note: benign ? benign.reason : '非公开系统信息读取（本档不适用）',
     });
     if (benign) return { kind: 'allow', law: '法无禁止', reason: benign.reason };
+    // 分形微观：网络取回（数据只进不出）同上——认证头凭据＝使用授权，与载荷/URL 凭据＝外传，分判
+    // （小D 59 号件①：读自有私有仓每次弹窗＝"我有权限但不被承认"；异域/载荷/URL 凭据仍走原审查）
+    const benignFetch = this.checkBenignFetch(call);
+    this._mark('M', {
+      step: '稳态结果 · 法无禁止即可为（网络取回：数据只进不出，落入 M 的显式放行档）',
+      hit: !!benignFetch, verdict: benignFetch ? 'allow' : null,
+      note: benignFetch ? benignFetch.reason : '非单纯取回（本档不适用）',
+    });
+    if (benignFetch) return { kind: 'allow', law: '法无禁止', reason: benignFetch.reason };
     // —— 路径1 归因锚点（分形子项 m 果，非整体 M 果）——
     // 边界铁律（用户定·防逻辑打架）：attrib 是「子项内部跑完一轮因果逻辑链的分形微型
     // m 果（M₁）」——只回答子问题"这动作类别能否锚定"；它 ≠ _decideCore 最终返回的

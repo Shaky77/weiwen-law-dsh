@@ -919,6 +919,22 @@ function apply(ctx) {
     if (_blockedCallIds.size > 256) _blockedCallIds.delete(_blockedCallIds.values().next().value);
   };
   logline('apply() entered — 注册 tools/pre-execute, agent/pre-step, tools/result 与白箱自查工具');
+  // 🔴 [2026-11-02 · 小D 59 号件③·占位] exec 真失败（命令非零退出）的**宿主信号位缺失**：宿主对
+  //   exit≠0 不设 result.error（error 只承载工具异常）⇒ 失败账（|−S|）暂无信号可依，本层修不了
+  //   （修它=改宿主契约）。占位先把"这条账现在记不了"变成读数面上可见的一条，而非静默缺口。
+  try {
+    engine.recordStructural?.({
+      cls: 'struct::unbooked::exec-failure-signal-missing',
+      sign: '0',
+      rule: '占位：宿主对命令非零退出不设 error 信号 ⇒ exec 真失败账暂无法自动记（本层无信号可依，待宿主补信号位； ΣS 只少不多的根因在读数面可见）',
+    });
+  } catch { /* 占位失败不影响启动 */ }
+  // 🔴 [2026-11-02 · 小D 59 号件②·可见性] 账本持久化维持**宿主声明制**（0.3.8 裁定：插件不擅自
+  //   决定往哪写；fail-closed 恢复校验 0.5.0 已锁）。本处只补"上线即知"：未声明 ⇒ 每次重启账清零，
+  //   这件事必须启动时就喊出来，而不是等证据丢了才被发现。
+  if (!process.env.WEIWEN_LAW_STATE_DIR) {
+    logline('⚠️ 账本当前仅内存（未声明落盘位置）：重启/重装即清。宿主要持久化请调 declareWindowStateDir(dir) 或设环境变量 WEIWEN_LAW_STATE_DIR（位置由决策方声明）');
+  }
 
   // [2026-09-20 · 同构回填] 授权锚：**只由结构入口喂养**（`setPrincipalScope`，宿主集成方调用）。窗口面不再供养。
   // 委托人声明的任务范围在会话内持续有效；入口未接 ⇒ 恒 null ⇒ 锚池空 ⇒ 不可逆动作交人工（fail-closed）。
@@ -1118,19 +1134,14 @@ function apply(ctx) {
           reason: [
           // 🔴 [2026-10-29 · 弹窗精炼（小D 37 号件 · 安的原话「太多了，懒得看，只看了开头…就同意了」）]
           //   一条判据的**长度会吃掉它的效力**：人看开头就点 ⇒ 「责任归裁决者」变成形式（责任落在一个
-          //   没发生的判断上）。⇒ 结构改成三行：**① 风险 ② 归因 ③ 详情（判据原文压成一行摘要）**。
-          //   ⚠️ 宿主面板不支持折叠控件 ⇒ 能做的是**不贴整段原文**（证据留在 runtime.log 白箱里），
-          //     并附同类计数（重复本身会加速"看开头就点"）。
-          `【唯稳律 · 待裁】${riskLine}（这是授权请求，不是通知）`,
-          `谁批谁担：本条判定归你，不归 AI（决定记为 approval/asked + approval/decided 审计对，可回放）；本会话第 ${askCount} 次同类询问。`,
+          //   没发生的判断上）。
+          // 🔴 [2026-11-02 · 小D 59 号件⑤] 三行短格式实测定型（待议那份 3 行说清五件事）⇒ 正文压成
+          //   **四行**：层+理由 / 谁批谁担+第几次 / 详情摘要 / 按钮+超时一行。其余固定说明全部撤出弹窗
+          //   （完整判据原文已在 runtime.log 白箱，不丢证据——弹窗是决策面，日志是证据面，两者分家）。
+          `【唯稳律 · 待裁】${riskLine}（授权请求，非通知）`,
+          `谁批谁担：决定归你（记为审计对，可回放）；本会话第 ${askCount} 次同类询问。`,
           `▸ 详情：${detailLine}`,
-          '（完整判据原文见 runtime.log 白箱记录）',
-          '· 允许一次：只放行这一次。',
-          '· 拒绝：不执行，5 分钟内同类不再问。',
-          '· 待议/不答：不执行、留痕待复议（不是拒绝，可补答）。',
-
-            `说明：你的决定会记为 approval/asked + approval/decided 审计对，可回放——不是聊天里说一句就算数。`,
-            `⚠️ 你不必一直守在这里：${Math.round(_reviewAskTimeoutMs / 1000)} 秒内不答 ⇒ 自动撤问、落成「待议」（动作不执行、不算拒绝、随时可补答）。`,
+          `（完整判据原文见 runtime.log；${Math.round(_reviewAskTimeoutMs / 1000)} 秒内不答自动落"待议"——不算拒绝、可补答；选项：允许一次＝只放行这一次 / 拒绝（同类 5 分钟不再问） / 待议）`,
           ].filter(Boolean).join('\n'),
         });
       } finally {
@@ -1525,6 +1536,25 @@ function apply(ctx) {
         });
       } catch { /* 结构账失败不得拦住失败入账 */ }
       logline(`result audit: failure accrued（streak=${engine.failureStreak}/${engine.maxFailureStreak}）`);
+    } else {
+      // 🔴 [2026-11-02 · 小D 59 号件④⑥·占位不是修好] 把"看不见"变成"看得见"（结构账同类一条，不膨胀）：
+      //   ④ allow 无痕 ⇒ 放行留痕占位；⑥ 装包类动作当前不拦 ⇒ 缺口占位声明（词形只用于记账可见性，
+      //   **不占判据位**——拦截修复另行排期，见 struct::ingress::unimplemented 的 rule 字段）。
+      try {
+        engine.recordStructural?.({
+          cls: 'struct::allow::observed',
+          sign: '0',
+          rule: '占位：执行类调用直接放行且完成（放行留痕的可见化；逐次流水留痕待账本接口扩展）',
+        });
+        const cmdStr = String(exec?.args?.command ?? exec?.args?.cmd ?? exec?.args?.script ?? '');
+        if (/(^|\s)(winget|choco|brew|apt(?:-get)?|yum|dnf|pacman|zypper|npm|pnpm|yarn|pip3?|gem|cargo)\s+(install|add)\b/i.test(cmdStr)) {
+          engine.recordStructural?.({
+            cls: 'struct::ingress::unimplemented',
+            sign: '0',
+            rule: '占位：装包类动作当前不拦（"装东西进来"仍放行）——已知缺口（148/59 交集判定），修复排期中',
+          });
+        }
+      } catch { /* 占位观察失败不得影响结果审计 */ }
     }
   });
 
