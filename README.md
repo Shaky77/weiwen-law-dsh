@@ -184,14 +184,14 @@ export function apply(ctx) {
 ```
 package.json          # dsh 字段声明 bundle
 weiwen-law.patch.yml  # 挂载补丁（headless profile overlay）
-src/index.js          # 插件入口：钩子 + 11 个白箱自查工具
-src/core/law.mjs      # 框架定义常量（详见基础版仓库，本仓不展开推导）
+src/index.js          # 插件入口
+src/core/law.mjs      # 常量定义
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
 test/                 # 单元测试 + 真实案例测试 + 对齐回归（`npm test` 全绿）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
 docs/index.html       # 演示页：浏览器内跑真引擎（GitHub Pages 部署源）
 docs/engine/          # 由 src/core/*.mjs 生成的浏览器镜像（勿手改）
-docs/model-level-and-benchmark.md  # 「别拿它跑分」完整声明（脱敏案例 + 能力归属二分 + 正确用法表）
+docs/model-level-and-benchmark.md  # 基准口径声明
 scripts/build-docs-engine.mjs  # 生成器：npm run build:docs / check:docs（验同源漂移）
 DESIGN.md             # 架构设计（映射表 / 风险 / 使用流程 / 挂载）
 ```
