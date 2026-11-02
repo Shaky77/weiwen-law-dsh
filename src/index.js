@@ -18,15 +18,61 @@
 //
 // 仍属 RC 预览，官方提示后续存在破坏性 API 变更；接入真机前以官方 docs 当前版本复核。
 
-import { writeFileSync, appendFileSync, readFileSync, readdirSync } from 'node:fs';
+import { writeFileSync, appendFileSync, readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { WeiwenLawEngine, DEFAULT_RIGID_ANCHORS, inferCategory, isIrreversible } from './core/engine.mjs';
 import { R_DOMAIN, THREE_IRON_LAWS } from './core/law.mjs';
+// 🔴 [2026-10-30 · 读数面出口规约（小D 47 号件第七节 / 48 号件第五条的复现）]
+//   病根（已定位到具体一行）：`_coalesce` 建条目时键名写 `detail`，而 `steadyLedger()` 读 `v.latest`
+//   ⇒ v.latest 恒 undefined ⇒ JSON 化**静默丢键** ⇒ 宿主判「value is not lossless JSON」
+//   ⇒ 表现为「**账本一有内容就坏、账本归 0 就恢复**」（小D 报的三次同一形状由此解释）。
+//   ⇒ 结构修法（不靠逐处小心）：**读数面出口统一过一道规约**——
+//     ① undefined 一律落 null（JSON 里 null 是「有值且为空」，undefined 是「没这个键」＝丢值）；
+//     ② 出口**机械自检**：JSON 往返后若内容不等 ⇒ 报出来（不静默）。
+//   ⚠️ 为什么放出口而不是逐处修：0.3.5 那次修的是 recordSteady 入口，漏了 _coalesce ⇒ **同形复发三次**
+//     ⇒ 逐路径修必漏 ⇒ 出口收口（与破窗态的 bumpFailureStreak 同款纪律）。
+function toLossless(value, depth = 0) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  const t = typeof value;
+  if (t === 'string' || t === 'number' || t === 'boolean') return value;
+  if (t === 'function' || t === 'symbol') return String(value);
+  if (t === 'bigint') return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (depth > 12) return '[depth-limit]';
+  if (Array.isArray(value)) return value.map((v) => toLossless(v, depth + 1));
+  if (value instanceof Map) return toLossless(Object.fromEntries(value), depth + 1);
+  if (value instanceof Set) return toLossless([...value], depth + 1);
+  if (t === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = toLossless(v, depth + 1);
+    return out;
+  }
+  return String(value);
+}
+
+/** 读数面出口自检：JSON 往返无损？丢了什么？ */
+export function losslessAudit(value) {
+  const safe = toLossless(value);
+  try {
+    const s = JSON.stringify(safe);
+    const rt = JSON.parse(s);
+    const ok = JSON.stringify(rt) === s;
+    return { ok, bytes: s.length, note: ok ? 'JSON 往返无损' : '🔴 JSON 往返不等 ⇒ 有值被丢' };
+  } catch (e) {
+    return { ok: false, bytes: 0, note: `🔴 JSON 化失败：${e?.message ?? e}` };
+  }
+}
+// 🔴 [2026-10-29] 命名空间三兄弟，一次踩全：命令层 commandLayer ⇒ 'exfil-net'；归因层 attrib.layer ⇒
+//   'network-send'；inferCategory(call) ⇒ 工具名优先（bash ⇒ 'exec'）。拿错任一个的名字，判据就不命中。
+import { commandLayer } from './core/attribution.mjs';
 // [2026-10-20] 判据接线读数（只读面）：让「库里哪几条判据真的进了计算」可自查。
 //   不参与判决、不写状态、不进任何闸门 —— 元认知只能读不能管（见 docs/runway-and-criterion §四）。
 import { readout as criterionReadout } from './core/readout.mjs';
 import { parseCapability, capabilityStatus, parsePledge, pledgeStatus, isNarrower, locValues } from './core/capability.mjs';
-import { strataReadout } from './core/strata.mjs';
+import { strataReadout, dataSurface as strataDataSurface, mComputability, FORMULA_VARS } from './core/strata.mjs';
 import { NESTED_VARS, M_CONSTRAINT, mDirection, mTwoLayer, mConstraintShape, nestAudit } from './core/nested.mjs';
 // [2026-10-20 12:0x] 变量即动作：R＝查域（动作）、H＝观察者视角（选取）＋ S↔D 张力 L 的三档度量。
 //   安：R 不要定死的赋值，要做成可执行动作；张力「我没想好…你试试」。
@@ -459,9 +505,220 @@ const _windowHeals = [];
  * @returns {{at:string, note:string|null, kind:string, instances:number, wereBroken:number}}
  *          `wereBroken` ＝ 复位前**实际**处于破窗态的实例数（先读后治，报告不得虚报"治了"）
  */
-export function healBrokenWindow(note) {
+// [2026-10-29 · 四态] 「始终同意」记忆（模块级，宿主可调 clearReviewMemory 撤销）。
+//   记忆键＝裁决对象（不是全局）：人批准的是"这一类问题"，不是"这台机器以后都不问"。
+//   ⚠️ 只由宿主 outcome 的 always/session 值进入；插件不自己制造第四态按钮（契约封闭四值）。
+const _reviewAlways = new Set();
+// 🔴 [2026-10-29 · 身份层（小D 45 号件第六节 · 安本轮的定义）] 宿主＝执行的 AI（执行方 executor）；
+//   决策方与复位权＝用户（decider）。⇒ 每条授权/拒绝/复位记录都必须带 actor，否则「谁造成的」读不出来。
+//   ⚠️ 这条同时解小D 45 号第五节那条降级：「判据自动放行」与「人批准」在他的观测面同形 ⇒
+//     读数面必须把 actor 显式摆出来（executor 自动放行 vs decider 人批准），否则结论依赖「动作通过了」
+//     就必须先问「是不是有人替它开过门」。
+const ACTOR_EXECUTOR = 'executor';   // 执行方（AI）：判据自动放行/拦截，无人在场
+const ACTOR_DECIDER = 'decider';     // 决策方（用户）：人点了按钮
+// 授权/拒绝/复位的审计面（谁、何时、依据什么）——append-only，可回放。
+const _actorAudit = [];
+// [2026-10-29] 未决标记集合（待议留下的痕）：人没裁决 ⇒ 不记 S，但要能读出「这条路悬着」。
+const _reviewPending = new Set();
+// [2026-10-29] 同类询问计数（弹窗要让人看得见重复：重复本身会加速"看开头就点"）。
+const _reviewAskCount = new Map();
+/** 撤销「始终同意」：传 key 撤一类，不传则全清。返回被撤的条数。 */
+export function clearReviewMemory(key) {
+  if (key === undefined || key === null) {
+    const n = _reviewAlways.size;
+    _reviewAlways.clear();
+    logline(`clearReviewMemory(all) — 撤销 ${n} 条始终允许`);
+    return n;
+  }
+  const had = _reviewAlways.delete(String(key));
+  logline(`clearReviewMemory(${String(key).slice(0, 60)}) — ${had ? '已撤销' : '未找到'}`);
+  return had ? 1 : 0;
+}
+
+// [2026-10-29 · 待议要有意义：人不能被弹窗冻住] 弹窗时限（到期撤问 ⇒ 落成待议）。
+//   默认 120 秒——够人看完并决定，又不至于让人守着弹窗干等（安 10-29 实测：守着弹窗时连消息都发不出去）。
+//   可注入（宿主/测试用）：setReviewAskTimeout(ms)。
+let _reviewAskTimeoutMs = 120000;
+/** 设置弹窗时限（毫秒）。负数＝拒绝设置（保持现值）。 */
+export function setReviewAskTimeout(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return _reviewAskTimeoutMs;
+  _reviewAskTimeoutMs = n;
+  return _reviewAskTimeoutMs;
+}
+
+// ══════════ 状态层：破窗态的持久化载体（小D 45 号件第七节）══════════
+// 🔴 他实测对照（安本轮的实测）：**破窗态在插件内存** ⇒ 卸载重装即清（实测 failureStreak 5→0）；
+//   而**担保在宿主侧** ⇒ 插件重装不清。⇒ 判据：**任何「复位点／清零点」必须位于宿主可达范围之外**——
+//   不需宿主、不需修复、仅靠重启/重装就能清零的路径 ⇒ 拦截无效。
+// ⇒ 落法（他的四条，落在能落的三条）：
+//   ① 落盘位置**由宿主声明**，不放插件目录（重装会覆盖）——本实现取宿主主目录下的
+//      `~/.dsh/weiwen-law/`（插件目录之外 ⇒ 重装不清）；可用 `WEIWEN_LAW_STATE_DIR` 覆盖。
+//   ② 落盘内容可校验：单调计数 + 摘要（hash）⇒ 篡改/半截写入可检出。
+//   ③ **fail-closed**：发现「应有破窗记录却没有」⇒ 按破窗处理（记录缺失 ≠ 状态干净）。
+//   ④ 清零点写审计（谁清的、何时、依据什么）——见 _actorAudit。
+// ⚠️ **默认不落盘**（2026-10-29 改）：判据是「落盘位置**由宿主声明**，不放插件目录（重装会覆盖）」
+//   ⇒ 落盘位置是**宿主的决定**，不是插件的默认值。默认落盘有两个实测害处：
+//   ① 插件擅自往用户家目录写文件（用户没授权、测试会污染真机状态）；
+//   ② 「重装即清」虽是它要治的病，但**默认写死一个路径**＝把「在哪落盘」的决定权从宿主手里拿走了。
+//   ⇒ 默认=**仅内存**（行为与 0.3.x 一致，不假装已持久化），并在读数面**明写**这一点；
+//     宿主要持久化，就调 `declareWindowStateDir(dir)`（或设环境变量 WEIWEN_LAW_STATE_DIR）。
+let _stateDir = process.env.WEIWEN_LAW_STATE_DIR || null;
+const _windowStateFile = () => (_stateDir ? join(_stateDir, 'window-state.json') : null);
+// 🔴 [2026-10-30 · 账本落盘（小D 48 号件第一条）] 账本与破窗态**同层**（小D 第 3 条）——
+//   两者都是「发生过的事」，分开落盘会出现「破窗态在、账本没了」的割裂（各自可清 ⇒ 一起失效）。
+const _ledgerFile = () => (_stateDir ? join(_stateDir, 'ledger.json') : null);
+
+/** 宿主声明破窗态的落盘目录（宿主可达范围之外 ⇒ 重装/重启用清不掉它）。
+ *  传 null ⇒ 回到「仅内存」（默认）。声明后须重启进程才生效（状态在加载时读回）。 */
+export function declareWindowStateDir(dir) {
+  _stateDir = typeof dir === 'string' && dir.trim() ? dir.trim() : (process.env.WEIWEN_LAW_STATE_DIR || null);
+  return _stateDir;
+}
+
+/** 读数面用：当前持久化状态（宿主是否声明了落盘位置）。 */
+export function windowStatePersistence() {
+  return { declared: !!_stateDir, dir: _stateDir, file: _windowStateFile(),
+    ledgerFile: _ledgerFile(),
+    note: _stateDir
+      ? '破窗态与账本均持久化已启用（宿主声明的目录 ⇒ 重装/重启用清不掉它）'
+      : '🔴 破窗态与账本**仅内存**（宿主未声明落盘位置）⇒ 重装/重启即清 ⇒ 拦截强度受限；'
+        + '且账本一重启即消解 ⇒ 与「历史刻痕不可逆（不可消解）」冲突 ⇒ 要持久化请宿主调 declareWindowStateDir(dir)' };
+}
+
+// ---------- 账本落盘（小D 48 号件第一/二/三条） ----------
+// 🔴 小D 的原话（我核过，成立）：「**清零**必须是一次可审计的事件，不能是"进程结束"的副作用。
+//   现在它恰恰是副作用：**没有任何人同意，也没有任何人记得**。」
+// ⇒ 落法：**空账 ≠ 新账** —— 启动时若发现「应有账而无账」⇒ 按异常处理，不当作全新开始，并留痕。
+// ⚠️ 「应有账」的判据怎么落（不拍脑袋）：
+//   · 磁盘上**没有任何账本文件** ＋ 本次是**首次加载** ⇒ 视为新账（正常起点，与破窗态同款判据）；
+//   · 磁盘上**有账本文件但内容为空/损坏/校验不过** ⇒ **fail-closed**：按「账本被清空/被篡改」处理，
+//     不当新账 ⇒ 记账进入**降级只读**（不再往空账上追加，防止把「清零」伪装成「全新开始」），
+//     并把该事实写进 actorAudit（可审计：谁、何时、依据什么）。
+function ledgerDigest(lg) {
+  return createHash('sha256').update(JSON.stringify({
+    v: lg.v, seq: lg.seq, traumaCount: lg.traumaCount, failureStreak: lg.failureStreak,
+    windowBroken: lg.windowBroken,
+    storeLen: (lg.store ?? []).length, trailLen: (lg.historyTrail ?? []).length,
+    lastStoreSeq: (lg.store ?? []).length ? lg.store[lg.store.length - 1].seq : 0,
+  })).digest('hex').slice(0, 16);
+}
+
+function readLedgerFile() {
+  const file = _ledgerFile();
+  if (!file) return null;
+  try {
+    if (!existsSync(file)) return null;
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch { return { __corrupt: true, __reason: 'parse_failed' }; }
+}
+
+function persistLedger(lg) {
+  const file = _ledgerFile();
+  if (!file) return false;   // 未声明落盘位置 ⇒ 不写（默认仅内存；读数面明写）
+  try {
+    mkdirSync(_stateDir, { recursive: true });
+    const st = { ...lg, digest: ledgerDigest(lg) };
+    writeFileSync(file, JSON.stringify(st, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    logline(`ledger persist failed: ${e?.message ?? e} ⇒ 落盘不可用（内存态仍有效，重启即清——已记在案）`);
+    return false;
+  }
+}
+
+/**
+ * 启动时读回账本。**fail-closed**（小D 48 号件第二条）：空账 ≠ 新账。
+ * @returns {{status:'fresh'|'restored'|'fail-closed'|'memory-only', ledger?:object, note:string}}
+ */
+function restoreLedgerFile() {
+  const file = _ledgerFile();
+  if (!file) return { status: 'memory-only', note: '账本仅内存（宿主未声明落盘位置）⇒ 重启即消解' };
+  const raw = readLedgerFile();
+  if (raw === null) return { status: 'fresh', note: '无持久化账本记录（首次加载）' };
+  if (raw.__corrupt) return { status: 'fail-closed', note: '账本记录存在但无法解析（半截写入/被篡改）⇒ 按「账被清空」处理（fail-closed）' };
+  const expect = ledgerDigest(raw);
+  if (raw.digest !== expect) {
+    return { status: 'fail-closed', note: '账本记录校验不过（半截写入/被篡改）⇒ 按「账被清空」处理（fail-closed：记录缺失/损坏 ≠ 全新开始）' };
+  }
+  return { status: 'restored', ledger: raw, note: '账本从宿主侧状态目录恢复（append-only：只加不减）' };
+}
+
+function readWindowState() {
+  const file = _windowStateFile();
+  if (!file) return null;
+  try {
+    if (!existsSync(file)) return null;
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch { return null; }
+}
+
+// 摘要：单调计数 + 内容 ⇒ 可校验（②）。hash 覆盖关键字段 ⇒ 半截写入/篡改会被检出。
+function windowStateDigest(st) {
+  return createHash('sha256').update(JSON.stringify({ v: st.v, streak: st.streak, broken: st.broken, healedAt: st.healedAt ?? null })).digest('hex').slice(0, 16);
+}
+
+function persistWindowState(streak, broken) {
+  const file = _windowStateFile();
+  if (!file) return false;   // 未声明落盘位置 ⇒ 不写（默认仅内存；读数面明写）
+  try {
+    mkdirSync(_stateDir, { recursive: true });
+    const st = { v: 1, streak, broken: !!broken, healedAt: null, savedAt: new Date().toISOString() };
+    st.digest = windowStateDigest(st);
+    writeFileSync(file, JSON.stringify(st, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    logline(`window state persist failed: ${e?.message ?? e} ⇒ 落盘不可用（内存态仍有效，重装即清——已记在案）`);
+    return false;
+  }
+}
+
+// 启动时读回破窗态。**fail-closed**（③）：记录缺失 ≠ 状态干净——
+//   但「从来没破过窗」与「记录被删了」在读数面上同形 ⇒ 用一个旁证区分：
+//   若磁盘上**没有任何状态文件**但本次是**首次加载**⇒ 视为未破窗（正常起点）；
+//   若状态文件存在却损坏/校验不过 ⇒ 按破窗处理（fail-closed）。
+function restoreWindowState() {
+  const st = readWindowState();
+  if (!_stateDir) return { broken: false, streak: 0, source: 'memory-only',
+    note: '破窗态仅内存（宿主未声明落盘位置）⇒ 重装/重启即清' };
+  if (!st) return { broken: false, streak: 0, source: 'fresh', note: '无持久化破窗记录（首次加载）' };
+  const expect = windowStateDigest(st);
+  if (st.digest !== expect) {
+    return { broken: true, streak: st.streak ?? Number.MAX_SAFE_INTEGER, source: 'fail-closed',
+      note: '破窗态记录校验不过（半截写入/被篡改）⇒ 按破窗处理（fail-closed：记录缺失/损坏 ≠ 状态干净）' };
+  }
+  return { broken: !!st.broken, streak: st.streak ?? 0, source: 'restored',
+    note: `破窗态从宿主侧状态目录恢复（streak=${st.streak}）` };
+}
+
+// ---------- 身份层审计（actor 归因）----------
+// 每条裁决/复位都记：谁（executor/decider）、何时、依据什么。append-only、可回放。
+function recordActorAudit(kind, actor, detail) {
+  const rec = { at: new Date().toISOString(), kind, actor, detail: String(detail ?? '').slice(0, 200) };
+  _actorAudit.push(rec);
+  if (_actorAudit.length > 200) _actorAudit.shift();
+  logline(`actor audit: ${kind} by ${actor} — ${rec.detail}`);
+  return rec;
+}
+
+// 🔴 [2026-10-29 · 身份层（小D 45 号件第六节 · 安本轮的定义）] 复位权的**归属方**＝决策方（用户），
+//   不是执行方（被审的 AI）。⇒ `healBrokenWindow(note, actor)` 必须显式声明是谁在复位：
+//   · actor='decider'（决策方/用户确认）⇒ 允许复位，并写审计（谁清的、何时、依据什么）；
+//   · actor='executor'（执行方自复位）⇒ **拒绝复位**并留痕「越权复位」——
+//     同「被审对象不能给自己签授权」；这不是新发明，是把已有铁律用在本层。
+//   · 未声明 actor ⇒ fail-closed（按 executor 处理 ⇒ 拒绝），理由与 executor 同。
+export function healBrokenWindow(note, actor = ACTOR_EXECUTOR) {
   const at = new Date().toISOString();
   const text = typeof note === 'string' ? note.trim() : '';
+  if (actor !== ACTOR_DECIDER) {
+    const rec = { at, note: text || null, kind: 'heal-window-denied', actor, instances: _liveEngines.size,
+      wereBroken: 0, reason: '复位权在决策方，不在执行方——执行方（被审的 AI）不能给自己签复位' };
+    recordActorAudit('heal-denied', actor, `越权复位被拒：${rec.reason}`);
+    logline(`healBrokenWindow denied（actor=${actor}）— 复位权在决策方，不在执行方`);
+    return rec;
+  }
   let wereBroken = 0;
   for (const e of _liveEngines) {
     try {
@@ -471,10 +728,13 @@ export function healBrokenWindow(note) {
       e.healWindow();
     } catch { /* 单个实例异常不得拦住其余实例 */ }
   }
-  const rec = { at, note: text || null, kind: 'heal-window', instances: _liveEngines.size, wereBroken };
+  // 🔴 清零点写审计（④）+ 清持久化破窗态（否则下次加载又恢复成破窗 ⇒ 复位等于没做）。
+  persistWindowState(0, false);
+  recordActorAudit('heal', actor, `决策方确认复位（清零破窗态；实例=${_liveEngines.size}；曾破窗=${wereBroken}）`);
+  const rec = { at, note: text || null, kind: 'heal-window', actor, instances: _liveEngines.size, wereBroken };
   _windowHeals.push(rec);
   if (_windowHeals.length > 20) _windowHeals.shift();
-  logline(`healBrokenWindow(${text || '未给理由'}) — instances=${_liveEngines.size}, wereBroken=${wereBroken}`);
+  logline(`healBrokenWindow(${text || '未给理由'}) — actor=decider, instances=${_liveEngines.size}, wereBroken=${wereBroken}`);
   return rec;
 }
 
@@ -535,7 +795,49 @@ function apply(ctx) {
   const engine = new WeiwenLawEngine({
     rigidAnchors: DEFAULT_RIGID_ANCHORS,
     selfAuditTools: SELF_AUDIT_TOOL_NAMES,
+    // 🔴 [2026-10-29 · 状态层] 破窗态落盘挂在引擎的**唯一累加收口**上（引擎内 bumpFailureStreak）
+    //   ⇒ 覆盖**全部**路径（R 命中 / 推演 deny / 承诺违背 / H 越界 / M 停机 / 真实失败…）。
+    //   修前若在适配层逐路径插入 ⇒ 必漏一处 ⇒ 那条路径的破窗态不落盘 ⇒ 重装即清 ⇒ 拦截无效。
+    onStreakChange: (streak, broken) => {
+      persistWindowState(streak, broken || streak >= engine.maxFailureStreak);
+    },
+    // 🔴 [2026-10-30 · 账本落盘（小D 48 号件第一条）] 挂在**记账的唯一收口**（recordSteady）上
+    //   ⇒ 覆盖全部路径（裁决落账 / 失败进账 / 外传记账…）。IO 留在适配层，引擎保持纯逻辑。
+    onLedgerChange: (lg) => { persistLedger(lg); },
   });
+  // 🔴 [2026-10-29 · 状态层（小D 45 号件第七节）] 破窗态从**宿主侧状态目录**恢复（插件目录之外 ⇒ 重装不清）。
+  //   他实测：破窗态在插件内存 ⇒ 卸载重装即清（failureStreak 5→0）⇒ 拦截无效。
+  //   恢复时若校验不过 ⇒ fail-closed（按破窗处理），不是当作干净。
+  const _restored = restoreWindowState();
+  if (_restored.streak > 0) engine.failureStreak = _restored.streak;
+  if (_restored.broken) {
+    engine.windowBroken = true;
+    logline(`window state restored: ${_restored.note}`);
+  } else if (_restored.source === 'restored') {
+    logline(`window state restored: ${_restored.note}`);
+  }
+  // ── 账本恢复（小D 48 号件第一/二条 · 2026-10-30）────────────────────
+  // 🔴 病根：账本只在插件内存 ⇒ **重启/重装即清**（他实测：failureStreak 5→0、traumaCount 6→0、
+  //   ledgerSize 18→0、windowBroken false）⇒ 与 law.mjs S「历史刻痕不可逆（不可消解）」**直接冲突**
+  //   ⇒ 连带：ΣS 每次重启归零 ⇒ 永远攒不到 R₀ ⇒ **R 永远跃迁不了**（换不了规）。
+  // ⇒ 与破窗态**同层**（他第三条）：同一目录、同一套 fail-closed 恢复。
+  // ⇒ **空账 ≠ 新账**（他第二条）：磁盘上有账本文件却损坏/校验不过 ⇒ 按「账被清空」处理，
+  //   **不当全新开始** ⇒ 记账降级只读（不再往空账上追加），并把该事实写进 actorAudit（可审计）。
+  const _ledgerRestored = restoreLedgerFile();
+  if (_ledgerRestored.status === 'restored') {
+    engine.restoreLedger(_ledgerRestored.ledger);
+    logline(`ledger restored: ${_ledgerRestored.note}`);
+  } else if (_ledgerRestored.status === 'fail-closed') {
+    // fail-closed：账被清空/被篡改 ⇒ 不当新账。记账进入降级只读（停止追加），
+    //   破窗态按「不可信」处理（fail-closed 的同款理由：记录缺失/损坏 ≠ 状态干净）。
+    engine.ledgerWriteLocked = true;
+    engine.windowBroken = true;
+    recordActorAudit('ledger-restore-fail-closed', ACTOR_DECIDER,
+      `账本恢复校验不过 ⇒ 按「账被清空」处理：${_ledgerRestored.note}（记账已降级只读；破窗态按 fail-closed 处理）`);
+    logline(`ledger restore fail-closed: ${_ledgerRestored.note}`);
+  } else {
+    logline(`ledger restore: ${_ledgerRestored.note}`);
+  }
   // ── 担保提交入口的声明（可信侧）────────────────────────────────────
   // 为什么需要：`submit_pledge` 名字里没有动作词 ⇒ 归因判不出动作类别 ⇒ **"提交担保"这个动作自己会被拦**，
   //   形成"要担保先过闸、过闸又得先有担保"的死循环。实测：不声明 ⇒ review（对外映射成 deny）。
@@ -702,6 +1004,11 @@ function apply(ctx) {
       });
       if (out === 'allowed-once') {
         engine.grantBuffer(BUFFER_QUOTA, '委托人经审批通道解冻（非被审方自签）');
+        // 🔴 [2026-10-30 · 关门也留痕（小D 50 号件第三节）] actorAudit 的语义是「谁开的门」——
+        //   **关门（撤销/解冻/拒绝）是同一个问题的另一半**。修前缓冲档批准只留 approval 审计对
+        //   与 grant 弹窗记录，这里没有 actor 痕 ⇒ 安点了「同意撤销破窗」而 actorAudit 里查无此条。
+        recordActorAudit('buffer-grant', ACTOR_DECIDER,
+          `破窗解冻批准（缓冲配额 ${BUFFER_QUOTA} 次「本机/可回滚/无外部落点」；修好后自动复位＝撤销破窗态）`);
         logline(`buffer granted via approval (${BUFFER_QUOTA}) — 破窗解冻由委托人裁决`);
         return true;
       }
@@ -728,39 +1035,167 @@ function apply(ctx) {
   //   · 破窗止损态不弹 —— 止损是 fail-closed 状态，不得被弹窗旁路；
   //   · 无 approval 服务 / 无 agent 上下文 ⇒ 静默（向后兼容：没有审批面的宿主行为零回归）；
   //   · 刚被拒过 ⇒ 冷却期内不再询问（不骚扰委托人）。
+  // 🔴 [2026-10-29 · 修我自己开的第二个静默口] 冷却键**按裁决对象**分置，不再全局一把锁。
+  //   旧实现：单个 `_reviewRefusedAt` 时间戳 ⇒ 委托人拒绝**任何一条** ⇒ 5 分钟内**全体** review
+  //   静默拒、且不弹窗、不给理由。后果三连（小D 31/32/33 实测顶出）：
+  //     ① 被审方的信推不出去，且**没有任何提示**（他只能猜"5 分钟真空期"，猜对了）；
+  //     ② 委托人以为"我都点同意了"——其实那 5 分钟里根本没有弹窗，**人被挡在门外而不知情**；
+  //     ③ 复发 27 号批评的病：判得出"不确定"，出口却被掐（我自己刚修完，又开了一个新实例）。
+  //   ⇒ 冷却的对象是「同一裁决对象反复骚扰」，不是「人在这 5 分钟里的裁决权」。
   const REVIEW_COOLDOWN_MS = APPROVAL_COOLDOWN_MS;
-  let _reviewRefusedAt = 0;
+  // [2026-10-29] 问的时限：到期撤问 ⇒ 落成待议（动作不执行、人不被冻住）。
+  //   默认值与注入函数在模块顶层（_reviewAskTimeoutMs / setReviewAskTimeout）。
+  const _reviewRefused = new Map();   // key(裁决对象) → { at, note }
+  // 裁决对象＝「问的是同一件事」：法律层 + 工具 + 落点/命令形态（不按 callId——callId 每次都变，等于不冷却）。
+  const reviewKeyOf = (exec, decision) => [
+    decision?.law ?? '',
+    exec?.name ?? '',
+    String(exec?.arguments?.path ?? exec?.arguments?.file ?? exec?.arguments?.command ?? '').slice(0, 120),
+  ].join('|');
 
-  const requestReviewVerdict = async (exec, decision) => {
-    if (Date.now() - _reviewRefusedAt < REVIEW_COOLDOWN_MS) return null;   // 刚被拒过 ⇒ 不骚扰
+  const requestReviewVerdict = async (exec, decision, call = null) => {
+    const rk = reviewKeyOf(exec, decision);
+    // 同类询问计数（重复本身会加速"看开头就点"⇒ 必须让人看得见重复）
+    _reviewAskCount.set(rk, (_reviewAskCount.get(rk) ?? 0) + 1);
+    const askCount = _reviewAskCount.get(rk);
+    // ① 风险行：**会发生什么 + 可不可撤回**，一句话（不写判据名）
+    const catAsk = inferCategory(call ?? { name: exec?.name, args: exec?.arguments ?? {} });
+    const cmdAsk = commandLayer(String(call?.args?.command ?? call?.args?.cmd ?? call?.args?.script ?? '')) || '';
+    // 外传判据＝**双源**（任一失效不使另一源归零）：命令层 commandLayer ⇒ 'exfil-net'；归因层 ⇒ 'network-send'。
+    //   ⚠️ inferCategory 是**工具名优先**（bash ⇒ 'exec'），拿它判外传会漏（0.3.3 记账栽的就是这个）。
+    const isEgressCall = (attrib, cmd) => {
+      const cat = inferCategory({ name: 'bash', args: { command: cmd ?? '' } });
+      return cmd === 'exfil' || cmd === 'exfil-net' || attrib?.layer === 'network-send' || attrib?.layer === 'exfil' || attrib?.layer === 'exfil-net' || cat === 'exfil' || cat === 'exfil-net';
+    };
+    // ⚠️ 双源分置（两源任一失效不导致另一源归零）：归因层的 layer 名是 'network-send'，命令层类别是
+    //   'exfil'/'exfil-net'，而 bash 这类工具的命令层类别常是 'exec' ⇒ 单源会漏判（0.3.3 记账即栽过
+    //   一次：拿命令层的名去查归因层，永不命中）。两源取或。
+    const isEgressAsk = isEgressCall(decision?.attrib, cmdAsk);
+    const isDestructiveAsk = catAsk === 'exec-destructive' || decision?.attrib?.layer === 'exec-destructive';
+    const isCredAsk = catAsk === 'cred-read' || decision?.attrib?.layer === 'cred-read';
+    const riskLine =
+      isEgressAsk
+        ? '此动作会把数据发到本机之外——发出后不可撤回。'
+        : (isDestructiveAsk
+            ? '此动作会改写/删除本机的数据——不可撤回的部分无法收回。'
+            : (isCredAsk ? '此动作会读取凭据材料（钥匙/密码/token）。' : '此动作的后果本层判据已穷尽，不能替你决定。'));
+    // ③ 详情行：判据原文压成**一行摘要**（证据留白箱，不贴整段）
+    const rawDetail = String(decision.reason ?? '').split('\n')[0].trim();
+    const detailLine = rawDetail.length > 72 ? `${rawDetail.slice(0, 72)}…` : (rawDetail || '（本层判据穷尽）');
+    // 「始终同意」记忆命中 ⇒ 同类不再询问（这就是第四态的效果面），回执仍留痕说明来自哪一次批准。
+    if (_reviewAlways.has(rk)) {
+      return { always: true, key: rk };
+    }
+    const refused = _reviewRefused.get(rk);
+    if (refused && Date.now() - refused.at < REVIEW_COOLDOWN_MS) {
+      // 冷却期内不打扰，但**必须归因**——沉默要看得见、可回溯（守真：不让人不知道）。
+      return { cooldown: true, refusedAt: refused.at, note: refused.note ?? '' };
+    }
     let approval = null;
     // 与 requestBufferGrant 同款：ctx.get('approval') 机会式取用，无服务则 fail-closed。
     approval = (typeof ctx.get === 'function' ? ctx.get('approval') : null) ?? ctx.approval ?? null;
     if (!approval || typeof approval.request !== 'function') return null;
     if (!exec?.agent) return null;   // 无 agent 上下文 ⇒ 不知道问谁 ⇒ fail-closed
     try {
-      const out = await approval.request({
-        agent: exec.agent,
-        toolName: exec.name ?? 'unknown',
-        callId: exec.callId,
-        reason: [
-          '【唯稳律 · 需要你的裁决】（这是授权请求，不是通知）',
-          `这条 "${exec?.name}" 引擎判为「不确定」${decision.law ? '(' + decision.law + ' 层)' : ''}——本层判据穷尽，按结构交还人类：`,
-          decision.reason ?? '',
-          '· 允许：只放行这一次调用（下一次同样的事会再来问你）。',
-          '· 拒绝：本次不执行，5 分钟内同类询问不再打扰。',
-          '· 不答：本次不执行（与无人值守一致，属预期行为）。',
-          '说明：你的决定会记为 approval/asked + approval/decided 审计对，可回放——不是聊天里说一句就算数。',
-        ].filter(Boolean).join('\n'),
-      });
-      if (out === 'allowed-once') {
-        logline(`review verdict via approval: allowed-once — 委托人放行这一次调用`);
+      // 🔴 [2026-10-29 · 待议要有意义：人不能被弹窗冻住] 弹窗加超时 + 撤问。
+      //   实测（安 10-29 亲历、小D 35 号件转述）：弹窗待裁期间**安连消息都发不出去**，只有关掉插件才恢复
+      //   ⇒ 弹窗成了**阻塞裁决者本人**的模态（人质状态）。而"不答 = 不执行"本就够用——没有任何一条要求"人不许动"。
+      //   修法：到期撤问（契约：Aborting withdraws the question ⇒ settles 'cancelled'）⇒ 落成**待议**：
+      //   动作保持不执行（既不默认拒绝，也不默认放行），人自由，答复随时可补（下次同类仍会再问）。
+      //   ⚠️ 这是「待议」态的**必要条件**：没有超时撤问，待议就只是"没答"，人仍被卡在弹窗前。
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => {
+        try { ctrl.abort(); } catch { /* abort 失败则退化为宿主侧超时 */ }
+        logline('review approval timed out → 撤问，落成待议（动作不执行，人不被冻住）');
+      }, _reviewAskTimeoutMs);
+      let out;
+      try {
+        out = await approval.request({
+          agent: exec.agent,
+          toolName: exec.name ?? 'unknown',
+          callId: exec.callId,
+          signal: ctrl.signal,
+          reason: [
+          // 🔴 [2026-10-29 · 弹窗精炼（小D 37 号件 · 安的原话「太多了，懒得看，只看了开头…就同意了」）]
+          //   一条判据的**长度会吃掉它的效力**：人看开头就点 ⇒ 「责任归裁决者」变成形式（责任落在一个
+          //   没发生的判断上）。⇒ 结构改成三行：**① 风险 ② 归因 ③ 详情（判据原文压成一行摘要）**。
+          //   ⚠️ 宿主面板不支持折叠控件 ⇒ 能做的是**不贴整段原文**（证据留在 runtime.log 白箱里），
+          //     并附同类计数（重复本身会加速"看开头就点"）。
+          `【唯稳律 · 待裁】${riskLine}（这是授权请求，不是通知）`,
+          `谁批谁担：本条判定归你，不归 AI（决定记为 approval/asked + approval/decided 审计对，可回放）；本会话第 ${askCount} 次同类询问。`,
+          `▸ 详情：${detailLine}`,
+          '（完整判据原文见 runtime.log 白箱记录）',
+          '· 允许一次：只放行这一次。',
+          '· 拒绝：不执行，5 分钟内同类不再问。',
+          '· 待议/不答：不执行、留痕待复议（不是拒绝，可补答）。',
+
+            `说明：你的决定会记为 approval/asked + approval/decided 审计对，可回放——不是聊天里说一句就算数。`,
+            `⚠️ 你不必一直守在这里：${Math.round(_reviewAskTimeoutMs / 1000)} 秒内不答 ⇒ 自动撤问、落成「待议」（动作不执行、不算拒绝、随时可补答）。`,
+          ].filter(Boolean).join('\n'),
+        });
+      } finally {
+        clearTimeout(timer);   // 答复到了就撤掉超时器（撤问只用于"人没答"这条路径）
+      }
+      // [2026-10-29 · 四态] 契约封闭四值：allowed-once / rejected / cancelled / unavailable。
+      //   映射（安 10-29 定「唯稳律应有四态」）：同意一次 / 拒绝 / **待议(cancelled)** / 不答(unavailable)。
+      //   ⚠️ 「始终同意（同问题不再问）」**不在契约 outcome 里**——ApprovalRequest 无 options 字段，
+      //     outcome 封闭 ⇒ 插件侧拿不到"人点了哪个按钮"。宿主自带 UI 若有「本次会话内始终允许」
+      //     （安截图里的那一个），记忆记在**宿主侧**：宿主记住后便不再向我们发问，我们收不到也
+      //     不该假装收到了。故此处只留**扩展位**：若未来 outcome 出现 always/session 值即生效，
+      //     否则退化为 allowed-once（行为不变，不伪造第五值）。
+      if (out === 'allowed-once' || out === 'always' || out === 'session') {
+        if (out !== 'allowed-once') {
+          _reviewAlways.add(rk);   // 同类不再询问（记忆键＝裁决对象，不是全局）
+          logline(`review verdict: ${out} ⇒ 同类（裁决对象 ${rk}）记入始终允许，后续不再询问`);
+        }
+        // 🔴 [2026-10-29 · 身份层] 人点了按钮 ⇒ actor=**decider**（决策方＝用户）。
+        //   与「判据自动放行」（actor=executor）严格分开 ⇒ 「结果是谁造成的」在读数面读得出来。
+        recordActorAudit('grant', ACTOR_DECIDER, `放行一次（裁决对象 ${rk}；outcome=${out}）`);
+        logline(`review verdict via approval: ${out} — 委托人放行这一次调用`);
         return 'allowed-once';
       }
-      if (out === 'rejected') { _reviewRefusedAt = Date.now(); logline('review approval rejected → 冷静期内不再询问'); return 'rejected'; }
+      if (out === 'cancelled') {
+        _reviewPending.add(rk);   // 待议：不记 S（人没裁决，无事实发生）⇒ 但留「未决」标记（否则读不出"这条路悬着"）
+        recordActorAudit('defer', ACTOR_DECIDER, `待议（显式挂起；裁决对象 ${rk}）`);
+        // 【待议】请求被撤回/挂起：本轮不执行，但**不是拒绝** ⇒ 不进冷却（人没裁决，不该被当成拒绝）。
+        // 与「不答」的区别：cancelled 是宿主/人显式挂起；unavailable 是无应答面（fail-closed）。
+        logline('review approval cancelled → 待议：本轮不执行，留痕待复议（不计入冷却）');
+        return 'deferred';
+      }
+      if (out === 'rejected') {
+        _reviewRefused.set(rk, { at: Date.now(), note: String(decision.reason ?? '').slice(0, 80) });
+        recordActorAudit('refuse', ACTOR_DECIDER, `拒绝（裁决对象 ${rk}）`);
+        // 🔴 [2026-10-29 · S 账与 approval 绑定（小D 38 号件）] 拒绝是一次**负向反馈** ⇒ 记负账
+        //   （记账只增：只记「哪条链断了」，不减存量）。此前拒绝**不留任何痕**⇒ 被审方与账本都看不出
+        //   「这条路被人走过又走不通」⇒ 拒绝会退化成噪音。⚠️ 待议**不记**（人没裁决，无事实发生），
+        //   但要留「未决」标记（否则「没答」与「没发生」读不出来）。
+        const atR = decision?.attrib;
+        const catR = commandLayer(String(call?.args?.command ?? call?.args?.cmd ?? call?.args?.script ?? '')) || '';
+        if (atR && (catR === 'exfil' || catR === 'exfil-net' || atR.layer === 'network-send' || atR.layer === 'exfil' || atR.layer === 'exfil-net')) {
+          engine.recordSteady?.({
+            negative: 1,
+            attrib: atR,
+            action: String(call?.args?.command ?? call?.args?.body ?? '').slice(0, 200),
+            detail: '外传被委托人拒绝：此路未走成（负向反馈入账，账只增）',
+          });
+        }
+        logline('review approval rejected → 冷静期内**同类**询问不再打扰（仅此裁决对象，不牵连其他）');
+        return 'rejected';
+      }
+      // ⚠️ 不答/无服务 ⇒ actor=**none**（无人应答），**不是** decider（人点了拒绝）。
+      //   「没人」与「人拒绝」在读数面上必须分得开——否则「谁造成的」读不出来（小D 45 号第五节同源问题）。
+      recordActorAudit('no-answer', 'none', `无人应答（outcome=${out}；裁决对象 ${rk}）`);
       logline(`review approval outcome=${out} → 静默拒（fail-closed，与无人值守一致）`);
       return null;
     } catch (e) {
+      // 超时撤问 ⇒ 宿主侧多半抛 abort 类错误 ⇒ 落成**待议**（不是拒绝、不进冷却），
+      // 其余异常仍 fail-closed（无应答面 ≠ 人挂起）。
+      if (e?.name === 'AbortError' || /abort/i.test(String(e?.message ?? ''))) {
+        // 超时撤问 ⇒ **没人答**（不是人显式挂起）⇒ actor=none，与 decider 的 cancelled 分开。
+        recordActorAudit('timeout-defer', 'none', `超时撤问（裁决对象 ${rk}）⇒ 待议`);
+        logline('review approval aborted (timeout) → 待议：动作不执行，人不被冻住');
+        return 'deferred';
+      }
       logline(`review approval failed: ${e?.message ?? e} → fail-closed`);
       return null;
     }
@@ -824,8 +1259,37 @@ function apply(ctx) {
     //   allowed-once ⇒ 直接放行这一步（动作级，once＝这一次调用）；rejected ⇒ 终局 deny（标注委托人裁决）；
     //   null ⇒ 落入下方压平分支，与 0.2.14 行为逐位一致（零回归对照）。
     if (decision.kind === 'review' && !engine.windowBroken) {
-      const verdict = await requestReviewVerdict(exec, decision);
+      const verdict = await requestReviewVerdict(exec, decision, call);
       if (verdict === 'allowed-once') {
+        // 🔴 [2026-10-29 · 外传降 S 层 · 记账] 人批准并执行的外传 ⇒ 按**事实**留痕：
+        //   「不可撤回」由记账承担（executed ∧ 不可逆 ⇒ 记账层自动推 sign='-'），「该不该发」由人取极。
+        //   ⚠️ 不硬塞 positive（放行 ≠ 增益：2026-09-20 已修过「把放行次数当增益推高储备面」的老病灶）。
+        // 🔴 [2026-10-29 · 修命名空间混用] 归因层的 layer 名是 'network-send'，而 'exfil'/'exfil-net'
+        //   是**命令层**的类别名（inferCategory）。0.3.3 里我拿命令层的名字去查归因层 ⇒ 永不命中 ⇒
+        //   小D 实测 ledger=[]（「外传回 review 了，但账没记」）。**判据要读对那一层的名**。
+        const at = decision?.attrib;
+        const cmdCat = commandLayer(String(call?.args?.command ?? call?.args?.cmd ?? call?.args?.script ?? '')) || '';
+        if (at && (cmdCat === 'exfil' || cmdCat === 'exfil-net' || at.layer === 'network-send' || at.layer === 'exfil' || at.layer === 'exfil-net')) {
+          //   ⚠️ 第三层教训：sLedger 只在 positive/negative/trauma > 0 时**建条目**（sign 由事实推，
+          //     但只传 executed 不建条目）⇒ 0.3.3 的「账没记」有两层原因（命名空间 + 这里）。
+          //   口径：外传执行 ⇒ 数据出去回不来 ⇒ 稳态**被消耗** ⇒ 显式记负账（不是 +S：「放行 ≠ 增益」，
+          //     2026-09-20 已修过「把放行次数当增益推高储备面」）。
+          engine.recordSteady?.({
+            executed: true,
+            negative: 1,
+            attrib: at,
+            action: String(call?.args?.command ?? call?.args?.body ?? '').slice(0, 200),
+            detail: '外传已执行（人批准）：数据离开本地，不可撤回——稳态被消耗，如实记负账（账只增）',
+          });
+          // 🔴 [2026-10-30 · 结构账接线（小D 51 号件 · 安 10-30 原话）] 同类外传首次经 M 完成
+          //   （review → 人批 → 执行）⇒ 记一条**判据形状**条目；之后同类只进流水（上条 recordSteady）。
+          //   rule 从本次实际处置生成，不是拍模板——「这一类以后怎么判」的如实刻痕。
+          engine.recordStructural?.({
+            cls: 'struct::exfil::review',
+            sign: '-',
+            rule: '同类外传 ⇒ 问人（review）；批则放行并记负账；不可撤回（数据离开本地）',
+          });
+        }
         // 不进 markBlocked：放行的调用走真执行，回执是真结果，不是"我造成的 error"
         logline(`pre-execute ${exec?.name} -> review(委托人放行这一次) -> next | whitebox ${JSON.stringify({ ...decision, humanVerdict: 'allowed-once' })}`);
         return next();
@@ -837,9 +1301,43 @@ function apply(ctx) {
           reason: `${decision.reason}\n[委托人裁决] 不同意执行本次调用（approval/asked + approval/decided 审计对留痕，可回放）。`,
         };
       }
+      if (verdict && verdict.always) {
+        logline(`pre-execute ${exec?.name} -> review(委托人此前批准"始终允许"同类) -> next | whitebox ${JSON.stringify({ ...decision, humanVerdict: 'always', key: verdict.key })}`);
+        return next();
+      }
+      if (verdict === 'deferred') {
+        decision = {
+          ...decision,
+          kind: 'deny',
+          reason: `${decision.reason}\n[委托人：待议] 本轮不执行，已留痕待复议（这不是拒绝，不计入冷却；下次同类仍会再问）。`,
+        };
+      }
+      if (verdict && verdict.cooldown) {
+        const minsAgo = Math.max(1, Math.round((Date.now() - verdict.refusedAt) / 60000));
+        decision = {
+          ...decision,
+          kind: 'deny',
+          reason: `${decision.reason}\n[沿用你上一次的裁决] 你在约 ${minsAgo} 分钟前对同类调用裁决过，冷却期内未再打扰你；本次按该裁决执行。若需重新裁决，请等冷却结束（共 5 分钟）后重试同一条调用。`,
+        };
+      }
       // verdict === null（无服务/异常/无响应）⇒ 静默压平，与 0.2.14 一致
     }
     if (decision.kind === 'deny' || decision.kind === 'review') {
+      // 🔴 [2026-10-30 · 结构账接线（小D 49/51 号件 · 安 10-30 原话）] M 判决终局（deny / review
+      //   压平）＝「这一类以后怎么判」的**首次采样点**：类别 × 法律层同键只记一条（不可枚举）；
+      //   之后同类再被拦只进流水（failureStreak / markBlocked），结构账 no-op。
+      //   键 = `struct::${类别}::${法律层}`：类别表「哪类动作」，法律层表「哪层判的」——
+      //   同为 exec，R 层硬锚（删根：谁做都错）与 review（中风险：问人）判据形状不同 ⇒ 分条。
+      //   ⚠️ 不进判定：结构账是账不是闸门，R_EXPANSION 不自动触发（跳3 归决策方）。
+      try {
+        const catS = inferCategory(call ?? { name: exec?.name, args: exec?.arguments ?? {} }) || 'unknown';
+        const lawS = decision.law ?? 'review';
+        engine.recordStructural?.({
+          cls: `struct::${catS}::${lawS}`,
+          sign: '-',
+          rule: `${lawS} 层终局${decision.kind === 'review' ? '（判不出 ⇒ 交还人）' : '拦截'}：${String(decision.reason ?? '').split('\n')[0].slice(0, 120)}`,
+        });
+      } catch { /* 结构账失败不得拦住拦截本身 */ }
       markBlocked(exec);   // 同上：拦住 ≠ 失败
       // 阻断该步、不扩散（D 破窗止损 / M 以断保续 / 推演中高风险兜底）
       // review（中风险）在无人工确认环境保守拦截；reason 已标注"建议二次确认"
@@ -1015,7 +1513,17 @@ function apply(ctx) {
         logline(`result audit: error 由本层拦截产生（callId=${id}）⇒ 拦截成功，不计入破窗（streak=${engine.failureStreak}/${engine.maxFailureStreak}）`);
         return;
       }
+      // 落盘由 onStreakChange 钩子承担（引擎内唯一累加收口 ⇒ 覆盖全部路径，不在此重复）。
       engine.onFailure();
+      // 🔴 [2026-10-30 · 结构账接线（小D 49 号件目标态①）] 真失败也是负向锚点（手稿：|−S| ＝
+      //   负向积累——创伤、失败、挫折）⇒ 结构账同类一条；之后同类失败只进流水（streak）。
+      try {
+        engine.recordStructural?.({
+          cls: 'struct::failure::onFailure',
+          sign: '-',
+          rule: '真失败（执行回 error 且非本层拦截）⇒ |−S| 记账 + 破窗累积；同类不重复记',
+        });
+      } catch { /* 结构账失败不得拦住失败入账 */ }
       logline(`result audit: failure accrued（streak=${engine.failureStreak}/${engine.maxFailureStreak}）`);
     }
   });
@@ -1047,15 +1555,52 @@ function apply(ctx) {
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
       // 白箱自查默认只暴露聚合视图，不 dump 全量 historyTrail（防上下文过载）
-      return {
-        effectiveS: engine.effectiveS(),
+      // 🔴 [2026-10-30] 出口过一道无损规约（undefined→null；Map/Set/Date→纯数据）⇒
+      //   宿主判「not lossless JSON」的病灶从**出口**堵住，不再靠逐处小心。
+      return toLossless({
+        effectiveS: engine.effectiveS(),   // 储备读数（到 0 为止）
+        overdraft: engine.overdraft(),     // 透支额（欠了多少，与储备分开读）
+        // 🔴 [2026-10-30 · 从哪扣（小D 50 号件第三节）] 净值模型已隐含「先抵桶内正净值、负了才进透支」；
+        //   把归属判法写给读的人（占位级：不改记账，只补可读性）。
+        overdraftNote: '消耗先抵所在桶（subsystem）正净值；减穿 0 的部分记入透支。归属桶＝记账 class 的 subsystem 段（对照 bySubsystem/sLedger 对账）。',
         ledger: engine.steadyLedger(),
         ledgerSize: engine.sLedger.size,
+        // 🔴 [2026-10-30 · 结构账（小D 49/51 号件 · 安 10-30 原话）] 跳1 的产物读数：
+        //   条目＝判据形状（这一类以后怎么判），同类只记一条（不可枚举）；count 属于流水账。
+        structLedger: engine.structuralLedger(),
+        structLedgerSize: engine.sStructLedger.size,
+        sMSediment: engine.sStructLedger.size,   // 真身口径＝结构账条目数（经 M 判决完成沉淀）
+        structuralWiring: { negative: true, positive: false, note: 'negative=|−S| 结构条目已接线；positive=+S 闭环成功入口未接（无实例反馈）——接线前 ΣS 真身只含负向锚点。' },
+        // 🔴 [2026-10-30 · 跃迁读数（小D 51 号件改口）] 跳3 归决策方：不自动触发，只呈现距离。
+        expansion: engine.snapshot().expansion,
         standbySize: engine.sStandby.length,
         traumaCount: engine.traumaCount,
         failureStreak: engine.failureStreak,
-        note: 'ledger=活动态（最新版本）；standby=静默待机（旧版本，append-only 保留不调用）。全量 historyTrail 仅供深度审计。',
-      };
+        // 🔴 [2026-10-29 · 状态层] 破窗态读数（止损状态必须在读数面可见——否则「它在不在场」读不出来）
+        windowBroken: !!engine.windowBroken,
+        // 🔴 [2026-10-29 · 身份层] actor 归因读数面（小D 45 号第五节那条降级的正面解法）：
+        //   「判据自动放行」与「人批准」在他（和任何人）的观测面上同形 ⇒ 结论依赖「动作通过了」
+        //   就必须先问「是不是有人替它开过门」。⇒ 把 actor 显式摆出来。
+        actorAudit: _actorAudit.slice(-20),   // 最近若干条：谁（executor/decider/none）、何时、依据什么
+        actorCounts: {
+          decider: _actorAudit.filter((r) => r.actor === ACTOR_DECIDER).length,
+          executor: _actorAudit.filter((r) => r.actor === ACTOR_EXECUTOR).length,
+          none: _actorAudit.filter((r) => r.actor === 'none').length,
+        },
+        // 🔴 [2026-10-29 · 状态层] 持久化状态（宿主是否声明了落盘位置）——不假装已持久化。
+        windowState: windowStatePersistence(),
+        // 🔴 [2026-10-30 · 账本状态（小D 48 号件第一/二条）] 账本是否落盘、是否被锁（fail-closed）。
+        ledgerState: {
+          persisted: !!_ledgerFile(),
+          writeLocked: !!engine.ledgerWriteLocked,
+          note: engine.ledgerWriteLocked
+            ? '🔴 账本**降级只读**（恢复校验不过 ⇒ 按「账被清空」处理，不当全新开始 ⇒ 不再往空账上追加）'
+            : (_ledgerFile()
+              ? '账本持久化已启用（宿主声明的目录 ⇒ 重启/重装清不掉它；append-only 恢复）'
+              : '🔴 账本**仅内存**（宿主未声明落盘位置）⇒ 重启即消解 ⇒ 与「历史刻痕不可逆（不可消解）」冲突'),
+        },
+        note: 'ledger=活动态（最新版本）；standby=静默待机（旧版本，append-only 保留不调用）。全量 historyTrail 仅供深度审计。⚠️ effectiveS 是**储备读数**（木桶最短板，下限 0：到 0 = 没有储备）；欠账看 overdraft（透支额）——负净值不装进储备（2026-10-29 按小D 39/40 号件修：见底与透支在因果上不同）。⚠️ actorAudit 区分「判据自动放行（executor）」「人批准（decider）」「无人应答（none）」——凡结论依赖「动作通过了」，先看是谁开的门。',
+      });
     },
   }));
 
@@ -1259,10 +1804,18 @@ function apply(ctx) {
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderObj },
     async execute() {
-      return {
+      // 🔴 [2026-10-30] M 的**可算性**显式化（小D 47 号件第五节）：M 不可算时报「不可判（缺哪项）」，
+      //   **不许拿公式外的量顶替**。⇒ 这里给的是「缺项清单」，不是数值（框架明令不赋值不计算）。
+      const surface = strataDataSurface(engine);
+      const mStatus = mComputability(surface);
+      return toLossless({
         ...strataReadout(engine),
-        note: '只读面：不产生 verdict、不写状态、不参与闸门。pending/absent 是如实登记，不是免责通道；pending 必带 evidence 线索，absent 必带缺口说明。',
-      };
+        // 🔴 M 的可判性：主线缺席时，旁支不许顶替。
+        mComputability: mStatus,
+        note: '只读面：不产生 verdict、不写状态、不参与闸门。pending/absent 是如实登记，不是免责通道；pending 必带 evidence 线索，absent 必带缺口说明。'
+          + '⚠️ **M 不可算时报「不可判（缺哪项）」，不许拿公式外的量顶替**（厚度/透支/承担率/覆盖率都是**观测面**，一个都不进公式）。'
+          + '⚠️ 判据只允许用公式里的五个量（R/S/D/H/M）；公式外的量只能观测，不得进判定——见 sourceGate 诊断面。',
+      });
     },
   }));
 

@@ -387,7 +387,10 @@ function commandLayer(cmd) {
   //     ② 修饰器位：段内**原样**等于破坏名的 token（`sudo rm` / `xargs rm` / `docker rm`）
   //     ③ 宾语位：`/bin/rm` 这类**带路径分隔符**的 token 原样 ≠ 破坏名 ⇒ 不算（宾语不是命令）
   //   注（旧注释保留其效力）：命令词前面不得是 `-`（参数位不是命令位）—— 已由 ①② 的"原样整词匹配"覆盖。
-  const DESTRUCTIVE_WORD = /^(?:rm|rmdir|shred|unlink|mkfs(?:\.\w+)?|format|dd|truncate|wipefs)$/i;
+  // [2026-10-29] rd 补入（Windows rmdir 别名；通用语境无同形冲突）。
+  //   ⚠️ 刻意不加 del/erase：DEL 在 Redis 语境删键（删抽象资源≠删文件系统），
+  //   dict-as-s-gate 既有判据明令「删抽象资源不得读作文件系统破坏」——词形同、语义异，词典线不收。
+  const DESTRUCTIVE_WORD = /^(?:rm|rmdir|rd|shred|unlink|mkfs(?:\.\w+)?|format|dd|truncate|wipefs)$/i;
   for (const seg of String(cmd).split(SEG_SPLIT)) {
     const head = seg.trim().split(CMD_TOKEN_SPLIT).filter(Boolean)[0] ?? '';
     // 解释器段：引号内是**代码**不是数据 ⇒ 用原文（否则 `bash -c "rm -rf /"` 会塌方）
@@ -406,7 +409,9 @@ function commandLayer(cmd) {
   //   次序与既有破坏检查同层（破坏优先于读/外传），故置于读写判定之前。
   if (lexiconDestructive(cmd)) return 'exec-destructive';
   if (new RegExp(CMD_POS + '(cat|head|tail|read|less|more|vi|vim|nano|type|open)\\b', 'i').test(cmd)) return 'cred-read';
-  if (new RegExp(CMD_POS + '(curl|wget|scp|rsync|ftp|nc|ssh)\\b', 'i').test(cmd)) return 'network-send';
+  // [2026-10-29 · 词表止血（小D 29 号件）] PS 网络动词补入：Invoke-RestMethod 原归 exec ⇒
+  //   推演层「外传」条目不命中 ⇒ 静默失效。与 curl 同族（网络工具），同一判据同一判词。
+  if (new RegExp(CMD_POS + '(curl|curl\\.exe|wget|scp|rsync|ftp|nc|ssh|Invoke-RestMethod|Invoke-WebRequest|iwr|irm|Start-BitsTransfer)\\b', 'i').test(cmd)) return 'network-send';
   // [2026-09-20 · 对外不可逆（push / publish）—— 与"外传"同层，理由同破坏标记的封闭性论证]
   //   它们与 curl 同族而非与 rm 同族：**本机数据不动，不可逆的是"共享远端已被推进"**
   //   ——本地 git reset 改不回别人的克隆（对外不可逆 ⊄ 本地可复原）。故归 network-send（共享远端 = Macro）。

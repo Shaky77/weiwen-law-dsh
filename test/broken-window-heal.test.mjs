@@ -35,12 +35,27 @@ const accrueFailures = (handlers, n) => { for (let i = 0; i < n; i += 1) handler
 const streakOf = async (tools) => (await toolNamed(tools, 'query_steady_state').execute({}, {})).failureStreak;
 const probeCall = () => exec('read', { file_path: '/tmp/ok.txt' });   // 无害调用：唯一可能被拒的理由只有破窗
 
+// 🔴 [2026-10-29 · 身份层（小D 45 号件第六节 · 安本轮的定义）] 复位**必须由决策方触发**：
+//   宿主＝执行的 AI（执行方 executor）｜决策方与复位权＝用户（decider）。
+//   ⇒ 复位入口现在带 actor 参数；不带 = 按 executor 处理 = **拒绝**（fail-closed）。
+//   本组用例的复位动作一律以**决策方**身份调用（宿主代用户执行复位）。
+const DECIDER = 'decider';
+
 // 这一条先跑：到此刻为止本进程内不应有任何实例处于破窗态（后面的用例自会制造，并各自收尾）。
 test('复位如实记数：无实例破窗时 wereBroken = 0（不虚报"治了"）', () => {
-  const rec = healBrokenWindow('自检：此刻不应有实例处于破窗态');
+  const rec = healBrokenWindow('自检：此刻不应有实例处于破窗态', DECIDER);
   assert.equal(rec.kind, 'heal-window');
   assert.equal(rec.wereBroken, 0, '未破窗不得报成治好（先读后治）');
   assert.equal(rec.note, '自检：此刻不应有实例处于破窗态', '复位必须留痕（何时因何解除）');
+  assert.equal(rec.actor, DECIDER, '复位记录须带 actor（谁清的）');
+});
+
+test('🔴 越权复位被拒：执行方（被审的 AI）不能给自己签复位', () => {
+  const denied = healBrokenWindow('执行方自复位', 'executor');
+  assert.equal(denied.kind, 'heal-window-denied', '执行方复位必须被拒');
+  assert.match(denied.reason, /复位权在决策方/, '拒绝理由须点明归属');
+  const noActor = healBrokenWindow('未声明 actor', undefined);
+  assert.equal(noActor.kind, 'heal-window-denied', '未声明 actor ⇒ fail-closed（按执行方处理 ⇒ 拒）');
 });
 
 test('破窗成立 ⇒ pre-execute 拒绝一切调用；宿主复位后同一调用被放行（止损不是死锁）', async () => {
@@ -53,7 +68,7 @@ test('破窗成立 ⇒ pre-execute 拒绝一切调用；宿主复位后同一调
   assert.equal(denied?.kind, 'deny', '破窗成立后未达终局的调用必须在执行前被拒');
   assert.ok(String(denied.reason).includes('破窗'), '拒绝理由须点名破窗止损（可归因，不是笼统 deny）');
 
-  const rec = healBrokenWindow('故障已修好并通过验证（测试）');
+  const rec = healBrokenWindow('故障已修好并通过验证（测试）', DECIDER);
   assert.ok(rec.wereBroken >= 1, '复位报告须承认此前确有实例在破窗态');
 
   const released = await handlers['tools/pre-execute'](probeCall(), next);
@@ -71,8 +86,8 @@ test('复位入口不是工具：模型面看不到它（结构入口 ≠ 工具
 });
 
 test('复位留痕：同一入口多次调用持续可溯（不静默清空）', () => {
-  healBrokenWindow('留痕自检 #1');
-  const rec = healBrokenWindow('留痕自检 #2');
+  healBrokenWindow('留痕自检 #1', DECIDER);
+  const rec = healBrokenWindow('留痕自检 #2', DECIDER);
   assert.equal(rec.note, '留痕自检 #2');
   assert.ok(rec.at, '留痕须带时间（"何时解除的"必须查得出）');
 });

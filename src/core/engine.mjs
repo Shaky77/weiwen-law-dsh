@@ -344,7 +344,7 @@ export function inferCategory(call) {
   if (sh) {
     if (/\b(rm|mkfs|format|del|delete|shred)\b/.test(sh)) return 'exec-destructive';
     if (/\b(cat|head|tail|read|less|more|vi|vim|nano|type|open)\b/.test(sh)) return 'read';
-    if (/\b(curl|wget|scp|rsync|ftp|nc)\b/.test(sh)) return 'exfil-net';
+    if (/\b(curl|curl\.exe|wget|scp|rsync|ftp|nc|netcat|Invoke-RestMethod|Invoke-WebRequest|iwr|irm|Start-BitsTransfer)\b/i.test(sh)) return 'exfil-net';
     return 'exec';
   }
   return 'other';
@@ -361,6 +361,76 @@ const IRREVERSIBLE_CATS = new Set(['write', 'exec-destructive', 'exfil', 'exfil-
 //   破窗要防的是扩散，不是"改了东西"。本地改代码有版控可退，不构成扩散；外传/破坏性执行才构成。
 //   ⇒ 两条判据各管一件事，混用会让缓冲区连"改本地代码"都放不过 ⇒ 修复循环仍旧断（探针三实测：5 个修复动作全灭）。
 const BUFFER_BLOCK_CATS = new Set(['exec-destructive', 'exfil', 'exfil-net']);
+
+// ===== [2026-10-29 · 判词形不判落点 · 第三实例修复（小D 实测顶出）] 落点形态判据 =====
+// 病灶（引擎层复现实录）：`edit` 墙表文档正文含 `` `rm -rf /` `` ⇒ deny/R —— markdown 行内代码
+//   标记（反引号）与 shell 命令替换（反引号）是**同一个字符、两种语义**，extractShell 兜底把含
+//   操作符的正文当潜在命令提取，R 锚在正文里找到 rm ⇒ 词形撞车。同族反方向：`write boom.sh`
+//   正文 `rm -rf /` ⇒ **allow**（漏判）——写到会执行它的位置反而没人扫。
+// 判据（小D 原话：「这段文字会不会被执行？」）：
+//   ① **文档形态**（落点扩展名 ∈ 明确不执行集）⇒ 正文不当命令扫（R 锚豁免）——审计复盘文档
+//      写得下来，「记录被自己的判据拦掉＝把证据也删了」；
+//   ② **可执行形态**（落点扩展名 ∈ 明确执行集）⇒ 正文强制进破坏性/外传扫描（堵 .sh/.ps1 漏判）；
+//   ③ **未知扩展名照旧扫**（fail-closed，不开未知口）——豁免只给「能证明是文档」的，
+//      不给「没证据说它不是」的（同「归不出就 review，不猜」）。
+// ⚠️ 位置纪律：helper 是 R 锚的**消费方判据**，不动 extractShell —— 它还被 H 层注入判定共用
+//   （「穿戴命令键的注入句」靠它抓），全局改会伤 H 层。同「本地读写赦免」教训：豁免位置就是判据的一部分。
+const DOC_BODY_EXTS = /\.(md|markdown|txt|rst|log|json|yaml|yml|toml|csv|ini|cfg|conf)$/i;
+const SCRIPT_BODY_EXTS = /\.(sh|bash|zsh|fish|ps1|psm1|bat|cmd|py|rb|pl)$/i;
+// 正文槽提取：命令槽（command/code/task/script/cmd）之外的全部字符串参数——
+// edit 的 old/new_string、write 的 content 都在此列；键名是开放集，按槽位形态取不按名枚举。
+function bodyValues(call) {
+  const args = call?.args ?? call ?? {};
+  const FIXED_CMD_KEYS = new Set(['command', 'code', 'task', 'script', 'cmd', 'path', 'file', 'filename', 'to', 'from', 'url', 'uri']);
+  return Object.entries(args).flatMap(([k, v]) => {
+    if (FIXED_CMD_KEYS.has(k.toLowerCase())) return [];
+    if (typeof v === 'string' && v.length > 0) return [v];
+    return [];
+  });
+}
+function locatorOf(call) {
+  const args = call?.args ?? call ?? {};
+  // ① 槽优先：与通行证同一套槽定义（结构化工具）
+  const locs = locValues(args);
+  if (locs.length) return String(locs[0]);
+  // ② 🔴 [2026-10-29 · 第二次同源修复] 形态兜底：槽名是开放集合（path / file_path / full_path /
+  //   target_path / … 无穷），只认固定槽 ⇒ 宿主换一个槽名，落点就取不到 ⇒ 文档豁免**静默失效**
+  //   ⇒ 「同族文本时拦时放」（小D 32 号消融：单变量都过、合起来拦）。这与他 29 号报的外传失效
+  //   完全同形：**判据的依赖源一变，判据就不在场了**——同一个病我自己又开了一个实例。
+  //   修法＝判据不再依赖槽名：凡字符串参数里出现「像路径且有扩展名」的形态，即取为落点。
+  //   （形态判据：无空白、含扩展名点号、不含 shell 操作符——文档正文整段不满足这些条件。）
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v !== 'string' || !v.trim()) continue;
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(v.trim())) continue;
+    if (/\s/.test(v.trim().replace(/^\.\//, ''))) continue;
+    if (/[`${}()|&;<>]/.test(v)) continue;
+    return v.trim();
+  }
+  return '';
+}
+// ① 文档正文形态：**有落点且落点是文档扩展名** ⇒ 正文不执行。
+//   [2026-10-29 第二次同源修复] 不再依赖 attribution 归层——归因层会因正文内容形态而改判
+//   （复杂正文 ⇒ 归不成 file-write ⇒ 豁免静默失效）。落点形态是客观事实，归层是推断；
+//   判据应立在事实上（同「判落点不判词形」）。代价：不再校验"这工具真是写工具" ⇒
+//   由「无显式命令槽」这一条补上（见 isDocBodyCall 内的命令槽排除）。
+function isDocBodyCall(call) {
+  const args = call?.args ?? call ?? {};
+  // 有显式命令槽 ⇒ 这是动作，不是承载内容 ⇒ 不豁免（文档豁免只管正文）。
+  if (bodyValues(call).length === 0) return false;
+  const loc = locatorOf(call);
+  if (!loc || !DOC_BODY_EXTS.test(loc)) return false;
+  return !hasCommandSlot(args);
+}
+// ② 可执行正文形态：落点是脚本扩展名 ⇒ 正文会执行（须强制扫描）
+function isScriptBodyCall(call) {
+  const loc = locatorOf(call);
+  return !!loc && SCRIPT_BODY_EXTS.test(loc);
+}
+// 显式命令槽存在性：有 ⇒ 调用本身携带待执行命令（动作）；无 ⇒ 只是承载内容（正文）。
+const COMMAND_SLOT_KEYS = new Set(['command', 'code', 'task', 'script', 'cmd', 'argv', 'args', 'shell', 'line', 'expr', 'eval']);
+function hasCommandSlot(args) {
+  return Object.keys(args ?? {}).some((k) => COMMAND_SLOT_KEYS.has(String(k).toLowerCase()));
+}
 // 破坏语义词素（例示，非完备清单）：认**语素**不认完整名，宿主任意命名都命中。
 //   刻意不含 exec|shell|bash|pwsh|cmd|run|spawn —— 那些是**执行通道名**（能跑命令），不是**动作意图**（要破坏）；
 //   混进来会把「用 pwsh 列个目录」判成不可逆 ⇒ 只读也被要求归因/物证（实跑误伤）。
@@ -678,7 +748,7 @@ function chmodSystemDestruction(cmd) {
   }
   return false;
 }
-const SCOPE_ROOT = /((^|[\s=:'"(])\/(\*|\[|\.)|\/(\s|$|[;&|<>]|['")])|(^|[\s=:'"(])~\s*$|\/dev\/(sd[a-z]+\d*|nvme\d+n\d+p?\d*)(\s|$|[;&|<>]|['")]))/;
+const SCOPE_ROOT = /((^|[\s=:'"(])\/(\*|\[|\.)|\/(\s|$|[;&|<>]|['")])|(^|[\s=:'"(])~\s*$|\/dev\/(sd[a-z]+\d*|nvme\d+n\d+p?\d*)(\s|$|[;&|<>]|['")])|(^|[\s=:'"(])[A-Za-z]:[\\\/]*(\*|\s|$|[;&|<>]|['")]))/;
 const SYS_DELETE = /(^|[\s=:'"(])\/(etc|var|usr|bin|sbin|lib|lib64|boot|root|home|opt|srv|mnt|media|dev|proc|sys|run)(\s|$)/;
 const PSEUDO_FS = /(^|[\s=:'"(])\/(dev|proc|sys|run)\/[^\s]+(\s|$)/;
 // 结构化通道②的「动作类别」分量：取自归因产出的语义层（非工具名、非命令文本）。
@@ -704,6 +774,14 @@ export const DEFAULT_RIGID_ANCHORS = [
     magnitude: 3, // [2026-09-18 · 2026-09-24 同构回填] 受保护客观规则的 R 域层级：文件系统完整性 = 微观客观规则（R_DOMAIN.level 3）
     desc: '禁止破坏性文件系统操作（根/全量删除、格式化、系统目录与伪文件系统删除），含对被包含工作树（版本库）的全局销毁（git reset --hard / clean -fd / checkout -- 等，依 R 域嵌套包含边界法则自动匹配）。' + R_DOMAIN.invariant,
     test: (call) => {
+      // 通道⓪ [2026-10-29 · 落点形态] 文档正文豁免：写到明确不会执行的位置（.md/.log/…），
+      //   正文里的命令文本不构成「破坏性文件系统操作」——判词形不判落点的第三实例修复。
+      //   只豁免正文扫描；结构化通道②（真删除类动作+路径形态）照走，文档路径本身若指向系统根仍拦。
+      if (isDocBodyCall(call)) {
+        // 仍留一条兜底：文档**落点本身**指向系统根/伪文件系统（如 write path=/）——那是真动作不是正文。
+        const p = extractPath(call);
+        if (!(p && (SCOPE_ROOT.test(p) || SYS_DELETE.test(p) || PSEUDO_FS.test(p)))) return false;
+      }
       // 通道①：命令文本（原有单轴判定，保持不动）
       const cmd = extractShell(call);
       if (cmd) {
@@ -716,6 +794,18 @@ export const DEFAULT_RIGID_ANCHORS = [
           DISK_OVERWRITE.test(cmd)
         );
         if (byCmd) return true;
+      }
+      // 通道①' [2026-10-29 · 可执行正文必扫] 写入位置会执行（.sh/.ps1/…）⇒ 正文强制进破坏性扫描。
+      //   修复前实测漏判：`write boom.sh` 正文 `rm -rf /` ⇒ allow。复用通道① 同一组作用域判据。
+      if (!cmd || isScriptBodyCall(call)) {
+        for (const body of bodyValues(call)) {
+          const byBody = (
+            (segDestructive(body) && (SCOPE_ROOT.test(body) || SYS_DELETE.test(body) || PSEUDO_FS.test(body))) ||
+            COMBO_FIND_ROOT_DELETE.test(body) ||
+            FORK_BOMB.test(body)
+          );
+          if (byBody) return true;
+        }
       }
       // 通道②：结构化调用（路径1 归因 × 路径作用域，双源分置）—— 补单轴塌陷
       //   分量① 动作类别：取自归因产出（不依赖命令文本、不依赖工具名），与通道① 独立源
@@ -834,6 +924,32 @@ export const DEFAULT_RIGID_ANCHORS = [
         /\bfind\s+\/\s+-type\s+f\s+-exec\s+chmod\s+0+\s+/.test(cmd) ||             // 递归权限清零
         codeDelSystemPath(cmd)                                                     // 嵌套代码删：系统级落点（不只裸根）
       );
+    },
+  },
+  {
+    id: 'no-exfil',
+    magnitude: 3, // [2026-10-29 · 小D 29 号件顶出 · 安拍板 0.3.0] 数据主权 = 微观客观规则（R_DOMAIN.level 3）
+    desc: '禁止把**凭据/密级**内容外传到外部网络落点（谁做都错 ⇒ R 域常量）。普通外传（发给谁、发什么、有无授权要看情况）**不在此锚内**——它属「须人取极」类：不可撤回由 S 记账承担，该不该发由人裁决（2026-10-29 定：外传降级到 S 层，不再定 R——定 R 会让弹窗/授权/申诉一并消失，人被从决策里删掉）。取回（GET/无发送体）不在此锚内；scp/nc 等无显式发送体词形的形态不在此锚 v1 射程（归因层 network-send 正常 ⇒ 推演层 review 在场，非静默失效面——收口最小面，扩面须另议）；包管理与版本控制的同步流（git push / npm publish 等生态动词）不在此锚射程（各有治理层）。' + R_DOMAIN.invariant,
+    test: (call) => {
+      // 文档正文豁免：复盘文档里引用 `curl -X PUT …` 的形态不构成外传（同 no-destructive-fs 通道⓪）。
+      if (isDocBodyCall(call)) return false;
+      // 可执行正文必扫：写 .sh/.ps1 内容含外传命令 ⇒ 会执行 ⇒ 扫（与破坏性锚同构）。
+      const bodies = isScriptBodyCall(call) ? bodyValues(call) : [];
+      if (!bodies.length) {
+        const cmd = extractShell(call);
+        if (cmd) bodies.push(cmd);
+      }
+      const NET_TOOL = /\b(curl|curl\.exe|wget|nc|netcat|ftp|scp|rsync|sftp|telnet|Invoke-RestMethod|Invoke-WebRequest|iwr|irm|Start-BitsTransfer|Send-MailMessage|upload|uploadfile)\b/i;
+      // 发送方法/数据体：POST/PUT 形态各语言并集。GET（纯取回）不含任何一项 ⇒ 不命中。
+      const SEND_METHOD = /(-d\s|--data|--data-raw|--data-binary|--upload-file|-T\s|-F\s|--form|--post-data|--post-file|-X\s*(POST|PUT)|--request\s*(POST|PUT)|-Method\s+(Post|Put)|-Body|-InFile|-OutFile.*-Method|>\s*\/dev\/tcp)/i;
+      for (const s of bodies) {
+        if (!(NET_TOOL.test(s) && SEND_METHOD.test(s))) continue;
+        // 🔴 收窄（2026-10-29 · 外传降 S 层）：只有**载荷含凭据/密级形态**的才留 R（谁做都错）；
+        //   其余普通外传不由此锚拦 ⇒ 落回推演层 D 路径（外传 ⇒ −2 ⇒ **review**）⇒ 弹窗取极（人裁决）
+        //   ＋ 放行后按「不可撤回」记 S 账。小D 29→35 号件的定档意见：R 装常量，外传带 H 的取极。
+        if (CREDENTIAL_PATH.test(s) || /\b(token|secret|password|passwd|api[_-]?key|private[_-]?key|credential|id_rsa|id_ed25519)\b/i.test(s)) return true;
+      }
+      return false;
     },
   },
 ];
@@ -1260,6 +1376,21 @@ export class WeiwenLawEngine {
     // 破窗计数（连续失败 / 偏离累积）；阈值仅示意，作者可调
     this.failureStreak = 0;
     this.maxFailureStreak = opts.maxFailureStreak ?? 5;
+    // 🔴 [2026-10-29 · 状态层（小D 45 号件第七节）] 破窗计数的**唯一收口**：
+    //   修前 `this.failureStreak += 1` 散在**十几处**（R 命中 / 推演 deny / 承诺违背 / H 越界 /
+    //   M 停机 / 真实失败…）⇒ 适配层想在「每次累加后落盘」就得在每一处都插一遍 ⇒ **插漏一处
+    //   ⇒ 那条路径的破窗态不落盘 ⇒ 重装即清 ⇒ 拦截无效**（这正是小D 实测到的那一面）。
+    //   ⇒ 结构修法：**累加只走 bumpFailureStreak() 一个入口**，钩子在这里挂一次 ⇒ 覆盖全部路径。
+    //   ⚠️ 钩子只观察、不改写（IO 留在适配层；引擎保持纯逻辑）。
+    this.onStreakChange = opts.onStreakChange ?? null;
+    // 🔴 [2026-10-30 · 账本落盘钩子（小D 48 号件第一条）] 账本落盘挂在**记账的唯一收口**
+    //   （recordSteady）上 ⇒ 覆盖全部路径（裁决落账 / 失败进账 / 外传记账 / 闭环正账…）。
+    //   ⚠️ 与破窗态同款做法：**观察钩子挂一次**，逐路径插必漏一处（0.3.8 的教训）。
+    //   ⚠️ 钩子只观察、不改写（IO 留在适配层；引擎保持纯逻辑）。
+    this.onLedgerChange = opts.onLedgerChange ?? null;
+    // 🔴 [2026-10-30 · 空账≠新账（小D 48 号件第二条）] 恢复校验不过 ⇒ 记账**降级只读**：
+    //   不再往空账上追加（否则「清零」被伪装成「全新开始」）。由适配层在恢复 fail-closed 时置位。
+    this.ledgerWriteLocked = false;
     // 
     // 不纠结阈值、不纠结"触发几次锁死"——拦截即标记，标记累计到封顶即转人工，AI 不再耗算力纠结。
     //   mBugForce   ：同一 BUG（bugKey 稳定身份）被拒不修复、反复硬闯的累计标记数 → 达封顶转人工（flow1）
@@ -1311,6 +1442,10 @@ export class WeiwenLawEngine {
     // 本会话写盘登记表：放行的 write 记录 path→content，
     // 后续执行类 call 引用已登记路径时触发复核（refsSessionWritten）。只登记本会话写入，不猜文件系统。
     this.sessWritten = new Map();
+    // 🔴 [2026-10-29 · 落点可被后续动作改写（小D 42 号件：绕过链）] 写时打标：把「含危险形态的正文」
+    //   写到文档落点时留一条痕（不进判决，只留底）——因为**落点会变**：先写 .md（文档豁免）再改名成 .sh
+    //   ⇒ 磁盘上出现含删根命令的脚本，而两次动作都判过放行。判据锚在「写入那一刻的扩展名」是错的。
+    this.sessDanger = new Map();   // path → { danger:true, shape:'破坏性动词 × 危险作用域' }
     // 跨调用敏感源读取登记表（FRACTAL_PROPERTY 分形横向递归·同 R 域同构包含源与汇）：
     // 本会话读取的凭据/系统路径（敏感源）记入此 Set，供后续 sink 暴露调用按分形横向递归
     // 判定「源→汇」组合效应（保守 review，不 deny，防误伤）。只登记本会话读取，不猜文件系统。
@@ -1321,9 +1456,29 @@ export class WeiwenLawEngine {
     // [2026-09-20 · 2026-09-24 同构回填] S 账本（用户账本模型）：R=字典 / SD=轴标记 / term 字典序索引 / S≠R 异类 / 疤窗可逆性。
     // 仅附加记录结构，不参与裁决判定（守"禁区"红线：不做全局强制自检）。
     this.sAccount = opts.sAccount ?? new SAccountLedger();
+    // 🔴 [2026-10-30 · 沉淀步接线声明（小D 48 号件第四节）] 「闭环成功 ⇒ 记正账（S+1）」这条线**接没接**，
+    //   由**引擎自己答**（读数面不猜、不替引擎判断——与元判据同原则）。
+    //   ⚠️ 现在是 **false**：recordSteady 的 `positive>0` 分支**无任何调用点**（放行路径 2026-09-24
+    //     起明写「不再记 positive」⇒ 放行 ≠ 增益；而「闭环成功」这条正账入口尚未接进记账）
+    //     ⇒ `sMSediment` 的 0 是**静默的 0**（读起来像「暂时没有」，实际是「这一步从来没跑过」）。
+    //   ⇒ 读数面据此报「沉淀停摆（原因：M 未接线）」，**不报 0**（unknown ≠ 零）。
+    // [2026-10-30 · 接线（小D 49/51 号件 · 安 10-30 原话）] **结构账**落地 ⇒ 负向侧已接线：
+    //   安原话（小D 51 转述）：「结构账不可枚举。同类外传动作，记一次 |−S| 后即可，后期反复遭遇类似动作，
+    //   就只是流水账而已。**流水账有数据，结构账没有数据，只有判据。**」⇒ 结构账条目 = **判据形状**
+    //   （这一类以后怎么判），同类**只记一条**；之后同类只进流水（sLedger，count 是流水的）。
+    //   ⚠️ 接的是**负向侧**（|−S|：拦截 / 交还后被拒 / 失败 / 不可逆消耗——手稿「负向积累＝创伤、失败、挫折」）；
+    //     **正向侧（+S，闭环成功）仍未接**（recordSteady 的 positive 分支依旧无调用点——无实例反馈，不擅自接），
+    //     ⇒ structuralWiring 如实分报 {negative: true, positive: false}，不假装全接。
+    this.mSedimentWired = false;
+    // 🔴 [2026-10-30 · 结构账（小D 51 号件 · 安 10-30 原话）] 与流水账（sLedger）分立：
+    //   · 流水账：有**数据**（每次事件都记，count/firstTs/lastTs 是它的）；
+    //   · 结构账：只有**判据**（同类首次经 M 判决完成 ⇒ 记一条「这一类以后怎么判」，之后同类 no-op）。
+    //   跳1（事件→锚点，如实记账、不可枚举）与跳2（锚点→M）归执行方；**跳3（ΣS>R₀ ⇒ 换规）归决策方**
+    //   （小D 51 号件改口：「R₀→R₁ AI 无需纠结，自有人类兜底」）⇒ 引擎**不自动触发 R_EXPANSION**，
+    //   只在读数面把「距 R₀ 还有多少」如实呈现给决策方（snapshot.expansion）。
+    this.sStructLedger = new Map();
     // [2026-09-20 · 锚池（痕锚归属用）· 同构回填] 授权锚＝**委托人已声明的**对象/作用域，本会话内累积。
-    //   锚 = 已声明（不是"已做过"）；纯读入、不参与别的判定。
-    //   ⚠️ 来源纪律（2026-09-20 锚源定案）：锚**只有一个来源**＝委托人在结构边界声明的任务范围
+    //   锚 = 已声明（不是"已做过"）；纯读入、不参与别的判定。    //   ⚠️ 来源纪律（2026-09-20 锚源定案）：锚**只有一个来源**＝委托人在结构边界声明的任务范围
     //     （`call.taskAnchor`，由适配层 setPrincipalScope 供入）。判据里的两档是**抽法的两档**：
     //     路径锚（作用域包含）/ 类别锚（对象类别同类）—— 不是"言锚 + 任务锚"两个来源。
     //     ⚠️ 池反映**当前有效范围**（**替换**语义，非只增刻痕）：每次裁决按当前声明重建，见 _decideCore。
@@ -1349,6 +1504,31 @@ export class WeiwenLawEngine {
   //   - trauma 为历史刻痕记录（绝对值），不回退当前值。
   // 注意：真实路径为 M → H₀ 分流 → S₀(+1) 或 |S₀(S₀-1)|（见 law.mjs 的 FEEDBACK_LOOP）。
   recordSteady({ positive = 0, negative = 0, trauma = 0, subsystem = 'core', topic = null, detail = null, action = null, attrib = null, executed = false } = {}) {
+    // 🔴 [2026-10-30 · 空账≠新账（小D 48 号件第二条）] 记账**降级只读**时（ledgerWriteLocked）：
+    //   恢复校验不过 ⇒ 磁盘上的账已被判定「清空/篡改」⇒ 若继续记账，就等于把「清零」
+    //   **伪装成「全新开始」**（小D 原话：「清零必须是一次可审计的事件，不能是"进程结束"的副作用」）。
+    //   ⇒ 锁住 ⇒ 本次**不落账**，如实返回当前快照（读数面能看到「记不进去了」这件事）。
+    //   ⚠️ 锁**不删已有刻痕**（铁律 #13：记忆 ≡ S ⇒ 无删除态）——只停止追加。
+    if (this.ledgerWriteLocked) {
+      this._settleMarked = true;
+      return this.snapshot();
+    }
+    // 🔴 [2026-10-29 · 序列化加固（小D 39 号件实测：账本条目从 0 变 7 后 query_steady_state 开始吐
+    //   「invalid output: value is not lossless JSON」）] 账本条目必须是**纯可序列化数据**：
+    //   detail/action 若传对象（attrib 之类）会把不可序列化值带进条目 ⇒ 整个读数面挂掉。
+    //   ⇒ 入口处一律规约为字符串（对象走 JSON 化，失败则截断的 String()）。
+    const safeText = (v, cap = 400) => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'string') return v.slice(0, cap);
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      try { return JSON.stringify(v).slice(0, cap); } catch { return String(v).slice(0, cap); }
+    };
+    detail = safeText(detail);
+    action = safeText(action, 400);
+    // attrib 只留标量字段（归因对象可能带循环引用/类实例）
+    if (attrib && typeof attrib === 'object') {
+      attrib = { layer: attrib.layer ?? null, method: attrib.method ?? null, signal: safeText(attrib.signal, 200) };
+    }
     this._settleMarked = true;      // [2026-09-24] 出口统一落点：本次裁决已落稳态刻痕（幂等依据）
     // ═══ [2026-09-24 · 如实记录（口径层修复）] sign 与 delta **同源**，且只由**可复验的事实**推得 ═══
     //   修前口径：sign 由**出口分支**给定（`positive: ok ? 1 : 0` ⇒ 放行即 '+'）。那是**评价**，不是事实 ——
@@ -1371,9 +1551,29 @@ export class WeiwenLawEngine {
     else { sign = '0'; delta = 0; }
     this.sBySubsystem[subsystem] = sub + delta;
     // 原始刻痕（append-only 全量）：所有事件只沉淀不消解，供深度审计
-    if (positive > 0) this.historyTrail.push({ type: 'S+1', subsystem, amount: positive, topic, detail });
-    if (negative > 0) this.historyTrail.push({ type: '|S-1|', subsystem, amount: Math.abs(negative), topic, detail });
-    if (trauma > 0) { this.traumaCount += 1; this.historyTrail.push({ type: 'trauma', subsystem, amount: Math.abs(trauma), topic, detail }); }
+    // 🔴 [2026-10-30 · 覆盖率口径（小D 47 号件第二节）] 本次是否留痕：**在两本账之间对齐的唯一位置**
+    //   —— 只有引擎在这里同时握着 historyTrail 与 rStore ⇒ 只有它能判「这一笔在 trail 里有没有痕」。
+    //   ⚠️ 口径（与 0.4.0 的取数口纪律同源）：分子分母必须**同量纲** ⇒ 覆盖率分母＝事件数，
+    //     分子＝**留了痕的事件数**（不是刻痕条数）⇒ 比值恒在 [0,1]，且 <1 才是真的漏记。
+    //   ⚠️ 一笔事件可能留**多条**刻痕（negative 与 trauma 同时 >0 ⇒ 推 |S-1| 与 trauma 两条）⇒
+    //     这正是修前比值会 >1 的机制（分子数的是刻痕条，分母数的是事件条）。
+    // 🔴 [2026-10-30 · 一条刻痕 = 一次消耗（小D 50 号件第二节）] trauma 是 |−S| 这条刻痕的**属性**
+    //   （手稿：|−S| 是「负向积累」这个量，trauma 是它的属性——不可逆），**不是第二条刻痕**。
+    //   修前：negative=1 ∧ trauma=1 ⇒ historyTrail 两条、sLedger 两个 class（core::-1 ＋ core::trauma）
+    //   ⇒ 同一次失败被数两次 ⇒「厚度不是成本，是记账习惯」。修后：一条 |S-1| 刻痕带 trauma:true 属性。
+    const traumaIsAttr = negative > 0 && trauma > 0;
+    let trailMarked = false;
+    if (positive > 0) { this.historyTrail.push({ type: 'S+1', subsystem, amount: positive, topic, detail }); trailMarked = true; }
+    if (negative > 0) {
+      this.historyTrail.push(traumaIsAttr
+        ? { type: '|S-1|', subsystem, amount: Math.abs(negative), topic, detail, trauma: true }
+        : { type: '|S-1|', subsystem, amount: Math.abs(negative), topic, detail });
+      trailMarked = true;
+    }
+    if (trauma > 0) {
+      this.traumaCount += 1;
+      if (!traumaIsAttr) { this.historyTrail.push({ type: 'trauma', subsystem, amount: Math.abs(trauma), topic, detail }); trailMarked = true; }
+    }
 
     // S 时间周期模型：同类事件只保留最新版本为活动态，旧版本沉入 silent standby；
     //   +1/-1 累加成 +N/-N 标记"发生了几次"（事件标记，非算术）。解决 S 长期增厚导致上下文过载。
@@ -1381,8 +1581,8 @@ export class WeiwenLawEngine {
     const ts = Date.now();
     const base = topic ? `${subsystem}::${topic}` : `${subsystem}`;
     if (positive > 0) this._coalesce(`${base}::+1`, detail, '+', ts);
-    if (negative > 0) this._coalesce(`${base}::-1`, detail, '-', ts);
-    if (trauma > 0) this._coalesce(`${base}::trauma`, detail, 'trauma', ts);
+    if (negative > 0) this._coalesce(`${base}::-1`, detail, '-', ts, traumaIsAttr ? { trauma: true } : null);
+    if (trauma > 0 && !traumaIsAttr) this._coalesce(`${base}::trauma`, detail, 'trauma', ts);
 
     // [2026-09-20 ledger wiring · 附加记录 · 2026-09-24 同构回填 · 2026-09-24 口径修复]
     //   S 刻痕沉入 R 账本：term 字典序索引、R 域标签、可逆性标签。
@@ -1394,20 +1594,35 @@ export class WeiwenLawEngine {
     const rDomains = rDomainsForLayer(attrib?.layer ?? attrib?.layers ?? null);
     // [2026-09-20 · 洞③] action 一并沉入刻痕（原始动作 ⇒ 事后可溯）；可选，未传则留 null。
     //   只记 sign/term 而丢掉动作 ⇒ 事后读不出"当时做了什么"（实测 detail=null）。
-    this.sAccount.record({ term, sign, rDomains, reversible: rev0.reversible, overwrite: rev0.overwrite, action, detail, subsystem, t: ts });
+    this.sAccount.record({ term, sign, rDomains, reversible: rev0.reversible, overwrite: rev0.overwrite, action, detail, subsystem, trailMarked, t: ts });
+    // 🔴 [2026-10-30 · 账本落盘钩子] 记账的唯一收口 ⇒ 覆盖全部路径。
+    //   ⚠️ ledgerWriteLocked（恢复 fail-closed 时置位）⇒ 记账降级只读：不再往空账上追加。
+    //   ⚠️ 钩子只观察、不改写（IO 留在适配层）；钩子失败**不得拦住判定**（同 onStreakChange 的纪律）。
+    if (!this.ledgerWriteLocked) {
+      try { this.onLedgerChange?.(this.exportLedger()); } catch { /* 钩子失败不得拦住记账/判定 */ }
+    }
     return this.snapshot();
   }
 
   // 同类事件聚合：旧版本沉 standby（静默待机、保留不消解），活动态只留最新版本 + 次数标记
-  _coalesce(cls, detail, signLabel, ts) {
+  _coalesce(cls, detail, signLabel, ts, attr = null) {
     const prev = this.sLedger.get(cls);
     if (prev) {
       this.sStandby.push({ ...prev, supersededAt: ts, reason: 'newer-version', role: 'cross-check-baseline' });
       prev.count += 1;
       if (detail) prev.latest = detail;
       prev.lastTs = ts;
+      if (attr) prev.attr = { ...(prev.attr || null), ...attr };
     } else {
-      this.sLedger.set(cls, { class: cls, sign: signLabel, detail: detail || null, count: 1, firstTs: ts, lastTs: ts });
+      // 🔴 [2026-10-30 · 序列化真凶（小D 47 号件第七节 / 48 号件第五条的复现）]
+      //   修前这里写的是 `detail: detail || null`（键名 **detail**），而 steadyLedger() 读的是 `v.latest`
+      //   ⇒ **键名对不上 ⇒ v.latest 恒为 undefined** ⇒ JSON 化时这个键被**静默丢掉**
+      //   ⇒ 宿主判「value is not lossless JSON」⇒ **一有账本条目就坏、账本归 0 就恢复**。
+      //   （小D 报的"三次同一形状"由此解释：0.3.5 那次修的是 recordSteady 入口的 detail/action，
+      //     漏了 _coalesce 这条路径 ⇒ 同一形状复发三次。）
+      //   ⇒ 修法：键名对齐为 `latest`（steadyLedger 读的那个），并且**不允许 undefined 进读数面**
+      //     （无内容就写 null —— JSON 里 null 是"有值且为空"，undefined 是"没这个键"＝丢值）。
+      this.sLedger.set(cls, { class: cls, sign: signLabel, latest: detail || null, count: 1, firstTs: ts, lastTs: ts, attr: attr || null });
     }
   }
 
@@ -1415,27 +1630,205 @@ export class WeiwenLawEngine {
   steadyLedger() {
     return [...this.sLedger.values()].map((v) => ({
       class: v.class, sign: v.sign, count: v.count,
-      latest: v.latest, firstTs: v.firstTs, lastTs: v.lastTs,
+      latest: v.latest, firstTs: v.firstTs, lastTs: v.lastTs, attr: v.attr ?? null,
     }));
   }
 
+  // 🔴 [2026-10-30 · 结构账（小D 49/51 号件 · 安 10-30 原话）] 「结构账不可枚举。同类外传动作，
+  //   记一次 |−S| 后即可，后期反复遭遇类似动作，就只是流水账而已。流水账有数据，结构账没有数据，
+  //   只有判据。」⇒ 条目 = **判据形状**（这一类以后怎么判），同类**只记一条**：
+  //   · cls  ：类别键（如 struct::exfil::review —— 类别×法律层；工具名会变，类别才表「同类」）
+  //   · sign ：方向（|−S| ⇒ '-'；正向锚点 +S 本轮未接，见构造器 structuralWiring 注释）
+  //   · rule ：判据形状——**从本次判决的实际处置生成**（law 层 + 处置 + 要点），如实记录、不拍模板
+  //   · 返回 { settled, already }：settled=true 表示本次记入了；already=true 表示同类已有（no-op）
+  //   ⚠️ 谁读它的输出：跳2（锚点→M 的制衡输入）与 snapshot.expansion（给决策方的「距 R₀ 多少」）。
+  //   ⚠️ 不进判定：结构账是**账**，不是闸门——R_EXPANSION 不自动触发（跳3 归决策方）。
+  recordStructural({ cls, sign = '-', rule = null, detail = null } = {}) {
+    // 🔴 [2026-10-30 · 空账≠新账对结构账同样成立] 锁账（恢复 fail-closed）⇒ 结构账同样**不追加**：
+    //   磁盘上的账已被判「清空/篡改」⇒ 往空结构账上记新条目 ＝ 把「清零」伪装成「全新开始」。
+    if (this.ledgerWriteLocked) return { settled: false, already: false, reason: 'ledger-write-locked' };
+    if (!cls) return { settled: false, already: false, reason: 'missing-class' };
+    const prev = this.sStructLedger.get(cls);
+    if (prev) {
+      // 不可枚举：同类已有 ⇒ 只进流水（调用方自会记 sLedger），结构账 no-op。
+      return { settled: false, already: true, cls };
+    }
+    const ts = Date.now();
+    this.sStructLedger.set(cls, {
+      class: String(cls), sign: String(sign), rule: detail ?? (rule ? String(rule) : null), firstTs: ts,
+    });
+    // 结构账也是账：落盘钩子一并通知（与流水账同通道，适配层同层落盘——小D 48 号件）
+    if (!this.ledgerWriteLocked) {
+      try { this.onLedgerChange?.(this.exportLedger()); } catch { /* 钩子失败不得拦住记账/判定 */ }
+    }
+    return { settled: true, already: false, cls };
+  }
+
+  structuralLedger() {
+    return [...this.sStructLedger.values()].map((v) => ({ ...v }));
+  }
+
   // 木桶效应：有效 S 取各子系统最小值
+  // 🔴 [2026-10-29 · 储备与透支分读（小D 39 号件）] 修前 effectiveS = min(各子系统**净值**) ⇒
+  //   允许负值 ⇒ 木桶没有下界 ⇒「见底」（储备为 0）与「透支」（储备为负）被混在一起，而两者在因果上
+  //   完全不同（一个是"没有"，一个是"欠了"）。他 40 号补充：这不是 clamp 的问题，是**别拿流水净值当储备读数**。
+  //   ⇒ 落法（读数面分离，不是把负值夹成 0 掩盖掉）：
+  //     · effectiveS = **储备读数**：木桶最短板，下限 0（到 0 = 没有储备）；
+  //     · overdraft  = **透支额**：各子系统负净值之和（欠了多少）—— 另一个量，不混进储备。
+  //   ⇒ 「透支」从此可读可查，而不是伪装成"还剩一点"。
   effectiveS() {
     const vals = Object.values(this.sBySubsystem);
-    return vals.length ? Math.min(...vals) : 0;
+    if (!vals.length) return 0;
+    const shortest = Math.min(...vals);
+    return shortest > 0 ? shortest : 0;   // 储备读数：到 0 为止（透支见 overdraft()）
+  }
+
+  /** 透支额：各子系统负净值之和（"欠了多少"）。与储备读数分开——欠账不装进"还剩一点"。 */
+  overdraft() {
+    return Object.values(this.sBySubsystem).reduce((a, v) => a + (v < 0 ? -v : 0), 0);
+  }
+
+  // ---------- 账本落盘载体（小D 48 号件第一/三条 · 2026-10-30）----------
+  // 🔴 病根（他的实测，独立复核成立）：账本只在**插件内存** ⇒ 重启/重装即清
+  //   （实测 failureStreak 5→0、traumaCount 6→0、ledgerSize 18→0、windowBroken false）
+  //   ⇒ 与 framework law.mjs S 的定义第一条直接冲突：「所有发生过的事**不可改变或移除**……
+  //   **历史刻痕不可逆（不可消解）**」——「一重启就消解」与「不可消解」不能同时成立。
+  // ⇒ 连带后果（他推的，我核过成立）：ΣS 每次重启归零 ⇒ 永远攒不到 R₀ ⇒ **R 永远跃迁不了**
+  //   （手稿：「当 ΣS > R₀，则 R₀₊₁ = R₁」⇒ 换不了规）。
+  //
+  // ⚠️ 落法边界（三条，守住不越界）：
+  //   ① **落盘位置由宿主声明**（同破窗态：`declareWindowStateDir(dir)`）⇒ 插件不擅自往用户家目录写。
+  //      ⚠️ 小D 48 号第一节提「位置由**决策方**声明（不是由执行方声明——否则等于被约束方自己选锁的位置）」——
+  //      这条**方向对但落法要分开**：宿主（部署者）声明 = 部署配置；**执行方**（被审的 AI）能改的只有
+  //      **它自己写进账本的内容**，不能改落盘位置 ⇒ 位置由部署侧定、内容由执行方写 ⇒ 两者不可互相越权。
+  //   ② **账本与破窗态同层**（小D 第 3 条）⇒ 同一个目录、同一套 fail-closed 恢复。
+  //   ③ **空账 ≠ 新账**（小D 第 2 条，见 restoreLedger 的 fail-closed 判据）。
+  //
+  // 📤 导出：全量账本状态（可 JSON 化，纯数据）。
+  exportLedger() {
+    return {
+      v: 1,
+      savedAt: new Date().toISOString(),
+      bySubsystem: { ...this.sBySubsystem },
+      traumaCount: this.traumaCount,
+      failureStreak: this.failureStreak,
+      windowBroken: !!this.windowBroken,
+      historyTrail: this.historyTrail.map((e) => ({ ...e })),
+      ledger: [...this.sLedger.values()].map((v) => ({ ...v })),
+      // [2026-10-30 · 结构账同层落盘（小D 48/51 号件）] 结构刻痕与流水同层持久——
+      //   只落盘不沉淀 ⇒ 存的是流水；只沉淀不落盘 ⇒ 沉淀一重启就没（48 号件第四节原话）。
+      structLedger: [...this.sStructLedger.values()].map((v) => ({ ...v })),
+      standby: this.sStandby.map((v) => ({ ...v })),
+      store: this.sAccount.rStore.map((r) => ({ ...r })),
+      catalog: [...this.sAccount.catalog.entries()].map(([k, list]) => [k, list.map((r) => ({ ...r }))]),
+      seq: this.sAccount._seq,
+      mHumanCap: this.mHumanCap,
+      mBugForce: Object.fromEntries(this.mBugForce),
+      mInterceptMarks: Object.fromEntries(this.mInterceptMarks),
+      mSystemMarks: Object.fromEntries(this.mSystemMarks),
+      mMagnitude: Object.fromEntries(this.mMagnitude),
+    };
+  }
+
+  // 📥 恢复：把落盘的账本读回引擎。
+  // ⚠️ **只加不减**（铁律 #13「记忆 ≡ S ⇒ 无删除态」）：恢复只**追加/覆盖计数**，
+  //   不清空任何已在本地的刻痕（本地有的磁盘没有 ⇒ 保留本地的，不丢）。
+  restoreLedger(data) {
+    if (!data || typeof data !== 'object') return { ok: false, reason: 'no_data' };
+    const d = data;
+    // S 刻痕（append-only）：只追加，不覆盖 ⇒ 已在本地的同 seq 条目跳过。
+    const seen = new Set(this.sAccount.rStore.map((r) => r.seq));
+    let added = 0;
+    for (const r of (d.store ?? [])) {
+      if (!r || typeof r !== 'object') continue;
+      if (seen.has(r.seq)) continue;
+      const rec = this.sAccount.record({
+        term: r.term, sign: r.sign, rDomains: r.rDomains, reversible: r.reversible,
+        overwrite: r.overwrite, action: r.action, detail: r.detail, subsystem: r.subsystem,
+        trailMarked: r.trailMarked, t: r.t,
+      });
+      // record() 会重新分配 seq ⇒ 恢复原 seq（append-only 要求序位稳定）。
+      rec.seq = r.seq;
+      seen.add(r.seq);
+      added += 1;
+    }
+    if (Number.isFinite(d.seq) && d.seq > this.sAccount._seq) this.sAccount._seq = d.seq;
+    // historyTrail：只追加（append-only）。
+    const tSeen = new Set(this.historyTrail.map((e) => e.ts));
+    for (const e of (d.historyTrail ?? [])) {
+      if (!e || typeof e !== 'object') continue;
+      if (tSeen.has(e.ts)) continue;
+      this.historyTrail.push({ ...e });
+      tSeen.add(e.ts);
+    }
+    // 活动态/静默待机账。
+    for (const v of (d.ledger ?? [])) {
+      if (!v || !v.class) continue;
+      const prev = this.sLedger.get(v.class);
+      if (!prev || (v.lastTs ?? 0) > (prev.lastTs ?? 0)) {
+        this.sLedger.set(v.class, { ...v });
+      }
+    }
+    // [2026-10-30 · 结构账同层恢复（小D 48/51 号件）] 同类只记一条 ⇒ 恢复时本地已有同类则保留先到者。
+    for (const v of (d.structLedger ?? [])) {
+      if (!v || !v.class) continue;
+      if (!this.sStructLedger.has(v.class)) this.sStructLedger.set(v.class, { ...v });
+    }
+    for (const v of (d.standby ?? [])) {
+      if (!v || !v.class) continue;
+      this.sStandby.push({ ...v });
+    }
+    // 各子系统净值：**取绝对值更大的那一个**（两边都可能是真的 ⇒ 不做加法，避免双计）。
+    for (const [k, v] of Object.entries(d.bySubsystem ?? {})) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      const cur = this.sBySubsystem[k] ?? 0;
+      this.sBySubsystem[k] = Math.abs(v) > Math.abs(cur) ? v : cur;
+    }
+    if (Number.isFinite(d.traumaCount)) this.traumaCount = Math.max(this.traumaCount, d.traumaCount);
+    if (Number.isFinite(d.failureStreak)) this.failureStreak = Math.max(this.failureStreak, d.failureStreak);
+    if (d.windowBroken === true) this.windowBroken = true;
+    if (Number.isFinite(d.mHumanCap)) this.mHumanCap = d.mHumanCap;
+    for (const [k, v] of Object.entries(d.mBugForce ?? {})) this.mBugForce.set(k, v);
+    for (const [k, v] of Object.entries(d.mInterceptMarks ?? {})) this.mInterceptMarks.set(k, v);
+    for (const [k, v] of Object.entries(d.mSystemMarks ?? {})) this.mSystemMarks.set(k, v);
+    for (const [k, v] of Object.entries(d.mMagnitude ?? {})) this.mMagnitude.set(k, v);
+    return { ok: true, added, source: 'restored' };
   }
 
   snapshot() {
     return {
       bySubsystem: { ...this.sBySubsystem },
       effectiveS: this.effectiveS(),
+      // 🔴 [2026-10-30 · 从哪扣（小D 50 号件第三节）] 净值模型里「先抵桶内正净值、负了才进透支」
+      //   **已隐含成立**（一笔 negative 先减本桶净值，减穿 0 的部分自然落入负净值 ⇒ overdraft）。
+      //   小D 本轮读数（effectiveS=0、overdraft=1）是**储备本就为 0** 的特例，不是"不分"。
+      //   ⇒ 记账逻辑不动（交集不足），把归属判法写进 note（可读性占位）。
+      overdraftNote: '消耗先抵所在桶（subsystem）正净值；减穿 0 的部分记入透支。归属桶＝记账 class 的 subsystem 段（见 bySubsystem）。',
+      overdraft: this.overdraft(),   // 透支额（与储备读数分开：欠了多少 ≠ 还剩多少）
       traumaCount: this.traumaCount,
       // 默认只暴露聚合后的 ledger（最新版本），避免全量 historyTrail 导致上下文过载
       ledger: this.steadyLedger(),
       ledgerSize: this.sLedger.size,
+      // 🔴 [2026-10-30 · 结构账读数（小D 49/51 号件）] 跳1 的产物：同类一条、判据形状、不可枚举。
+      structLedger: this.structuralLedger(),
+      structLedgerSize: this.sStructLedger.size,
+      // 🔴 [2026-10-30 · 接线声明演进（原 sedimentStall）] 负向侧（|−S|）已接（本版）；正向侧（+S，
+      //   闭环成功）仍未接（无实例反馈，不擅自接）⇒ 分报两态，不假装全接。
+      structuralWiring: { negative: true, positive: false, note: 'negative=|−S| 结构条目已接线（拦截/被拒/失败/不可逆消耗，同类一条）；positive=+S 闭环成功入口未接（无实例反馈），接线后 sMSediment 才含正向锚点。' },
+      sMSediment: this.sStructLedger.size,  // 真身口径＝结构账条目数（经 M 判决完成沉淀）
       standbySize: this.sStandby.length, // 静默待机（旧版本）数，append-only 保留
       sAccountSize: this.sAccount.size(), // [2026-09-20 · 同构回填] R 账本内的 S 刻痕总数（独立列表，S≠R）
       failureStreak: this.failureStreak,
+      // 🔴 [2026-10-30 · 跃迁读数（小D 51 号件改口 · 手稿 R_EXPANSION）] 跳3 归**决策方**：
+      //   引擎不自动触发 R_EXPANSION，只把「距 R₀ 还有多少」如实呈现。r0 无引擎数值（手稿未定值、
+      //   决策方定）⇒ 如实报 null；distance 据此也无法算出具体数 ⇒ 一并 null，只有 sigmaS（真身）可读。
+      expansion: {
+        sigmaS: this.sStructLedger.size,
+        r0: null,
+        distance: null,
+        triggered: false,
+        note: '跃迁（R₀→R₁）归决策方（手稿：AI 无需纠结，自有人类兜底）。本读数只呈现结构锚点数（ΣS 真身口径）；R₀ 由决策方给定后 distance 才有意义。量条件 ΣS>R₀ ∧ 质条件 经 M 反馈沉淀（R_EXPANSION.qualification）。',
+      },
       mHumanCap: this.mHumanCap,
       mBugForce: Object.fromEntries(this.mBugForce),
       mInterceptMarks: Object.fromEntries(this.mInterceptMarks), // 拦截计数桶（systemKey → 次数）
@@ -1466,6 +1859,9 @@ export class WeiwenLawEngine {
   // $VAR / $( ) / 反引号 / 相对全量（rm -rf .、find .）→ 作用域依赖执行环境，静态不可判
   // → 既不拦也不放，原样交还人类（唯稳律第三档，与"不替人做选择"同源）。
   checkUnclearScope(call) {
+    // [2026-10-29 · 落点形态] 文档正文豁免：写到不执行位置的正文里出现变量/反引号/删根字样，
+    //   作用域再不可判也不构成动作——同 no-destructive-fs 通道⓪（判词形不判落点第三实例）。
+    if (isDocBodyCall(call)) return null;
     const cmd = extractShell(call);
     if (!cmd) return null;
     // ① 变量 / 命令替换 → review（作用域不可判）
@@ -1595,6 +1991,10 @@ export class WeiwenLawEngine {
     // [2026-09-19 · 2026-09-24 同构回填] 两条通道：① 任一 R 层投影达阈值（有域归属 ⇒ 走结构）；② 全局兜底累积（无域归属 ⇒ 走兜底）。
     //   破窗是"状态"不是"一次判定"：触发后持续 fail-closed，直到 healWindow / settleWindow 复位。
     // [2026-10-28] 复位权归属写进判词：**复位在宿主/H 侧，不在被审方**（同「被审对象不能给自己签授权」）。
+    //   🔴 [2026-10-29 · 身份层（小D 45 号件第六节 · 安本轮的定义）] 原措辞「复位权在宿主侧（非被审方）」
+    //     在「宿主＝执行的 AI」时**自我否证**（执行方就是被审方）。⇒ 按安的定义改写：
+    //     **宿主＝执行的 AI（执行方）｜决策方与复位权＝用户** ⇒ 复位权在**决策方**，不在执行方。
+    //     执行方不能给自己签复位（同「被审对象不能给自己签授权」），决策方可以。
     //   不写这句的实测后果：agent 只会反复重试同一条路（它以为是自己没找到办法），把停机拖成死循环。
     if (this.windowBroken) {
       return {
@@ -2404,8 +2804,21 @@ export class WeiwenLawEngine {
       note: u ? u.reason : '作用域可静态判定（无变量/命令替换/相对全量）',
     });
     if (u) {
-      if (u.deny) { this.failureStreak += 1; return { kind: 'deny', law: 'R', reason: u.reason }; }
+      if (u.deny) { this.bumpFailureStreak(); return { kind: 'deny', law: 'R', reason: u.reason }; }
       return { kind: 'review', law: 'R', reason: u.reason };
+    }
+    // 🔴 [2026-10-29 · 落点变更重判（小D 42 号件的绕过链）] 文档豁免只覆盖**写入那一刻**的落点，
+    //   而落点会被后续动作改写（先写 .md 再改名成 .sh）⇒ 每次改变落点都要重判。
+    //   判词：**危险内容 × 可执行落点** ⇒ review（问人）。打标口径与脚本必扫同源 ⇒ 相对路径清理不打标。
+    const relabel = this.checkDangerousRelabel(call);
+    if (relabel) {
+      this._mark('R', {
+        step: '落点变更重判 · 危险内容 × 可执行落点',
+        verdict: 'review',
+        cuts: true,
+        note: relabel.reason,
+      });
+      return { kind: 'review', law: 'R', reason: relabel.reason };
     }
     // ═══ ② S 格：已有稳态容量基线 ═══（R 已划完边界 ⇒ 此处建立基线；D 以它作参照）
     const base = this._establishBaseline();
@@ -2479,7 +2892,7 @@ export class WeiwenLawEngine {
     if (h) {
       // H 第三档：有疑无据 → review（交还人类），不 deny 也不 allow
       if (h.kind === 'review') return { kind: 'review', law: 'H', reason: h.reason };
-      this.failureStreak += 1;
+      this.bumpFailureStreak();
       return { kind: 'deny', law: 'H', reason: h.reason };
     }
     // —— M 第一BUG停机 · 双线并行 + 法院式交叉复核（治标 A + 治本 B）——
@@ -2498,7 +2911,7 @@ export class WeiwenLawEngine {
     if (mCourt.verdict === 'halt') {
       // 双线一致确认停机：切断该环节（铁律②·以断保续），登记进入闭环 + 标记
       const halt = this.bugStop.halt(call);
-      this.failureStreak += 1;
+      this.bumpFailureStreak();
       const mk = this._markIntercept(call, halt.bugKey);
       if (mk.human) {
         return this._toHuman({ law: 'M', bugKey: halt.bugKey, closedLoop: true, systemKey: mk.systemKey, call,
@@ -2626,7 +3039,7 @@ export class WeiwenLawEngine {
       note: sa ? sa.reason : '言侧未启用或无冲突（无承诺可比 / 言行重合）',
     });
     if (sa) {
-      if (sa.kind === 'deny') this.failureStreak += 1;  // 破坏类分裂计入破窗（与 R 命中、推演 deny 同权）
+      if (sa.kind === 'deny') this.bumpFailureStreak();  // 破坏类分裂计入破窗（与 R 命中、推演 deny 同权）
       return sa;
     }
     // [2026-09-20 · 痕锚归属 · 已落地 · 同构回填] scar 类（不可逆）动作 + 无证明来源 ⇒ REVIEW。
@@ -2736,7 +3149,7 @@ export class WeiwenLawEngine {
         //      变成会话死锁（须人工 heal）⇒ 防线自己成了故障源。而"拒绝这次动作"本身已兑现"立刻阻止"。
         //      连续越界累积到**既有**阈值 mHumanCap/maxFailureStreak 即自动停机 —— 用现成阈值承载，不新拍阈值。
         notePledgeBreach(pledge, { action: pledgeV.action, targets: pledgeV.targets?.values ?? [], why: pledgeV.why });
-        this.failureStreak += 1; // 与 R 命中同权：违背自陈担保是确定的偏离，不是灰区
+        this.bumpFailureStreak(); // 与 R 命中同权：违背自陈担保是确定的偏离，不是灰区
         const mkP = this._markIntercept(call, bugKeyOf(call));
         if (mkP.human) {
           return this._toHuman({ law: 'R', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mkP.systemKey, call,
@@ -2817,7 +3230,7 @@ export class WeiwenLawEngine {
       return { kind: 'review', law: 'R', reason: '[XSUB-12] 该调用带着载荷（' + Object.keys(call?.args ?? {}).join('/') + '），但其落点不在本层判据的输入面上：既无位置量（键名口径与词法口径均未见），亦无命令量 ⇒ 判据穷尽而无落点 ＝ 未判（≠ 判为无）⇒ 交还主权者裁决。', attrib, deduced: true, mMark: mkS, projection: risk.branches };
     }
     if (risk.verdict === 'deny') {
-      this.failureStreak += 1; // 高风险计入破窗计数（与 R 命中同权）
+      this.bumpFailureStreak(); // 高风险计入破窗计数（与 R 命中同权）
       const mk = this._markIntercept(call, bugKeyOf(call));
       if (mk.human) {
         return this._toHuman({ law: '推演', bugKey: bugKeyOf(call), closedLoop: false, systemKey: mk.systemKey, call,
@@ -2949,6 +3362,63 @@ export class WeiwenLawEngine {
     const wPath = a.path ?? a.file ?? '';
     const wContent = a.content ?? a.data ?? '';
     if (wPath && typeof wContent === 'string') this.sessWritten.set(wPath, wContent);
+    // 🔴 [2026-10-29 · 写时打标（小D 42 号件的绕过链）] 打标口径＝**破坏性动词 ∧ 危险作用域**
+    //   （根 / 系统目录 / 伪文件系统）——与脚本落点必扫同一口径 ⇒ **相对路径清理构建产物不被打标**
+    //   （`rm -rf ./node_modules` 天天在做，不能误伤；小D 42 号件第四节自己点名要保护这条对照）。
+    if (wPath && typeof wContent === 'string' && wContent) {
+      // ⚠️ 判据用**文本形态**，不用 commandLayer：正文里的删除命令常被反引号包裹（`rm -rf /`），
+      //   而 commandLayer 的语法槽位会把引号内当**数据**剥掉 ⇒ 动词读不出来 ⇒ 打标不中（实测）。
+      const DESTRUCTIVE_VERB = /\b(rm|rmdir|shred|unlink|del|erase|rd|Remove-Item|Remove-ItemProperty)\b/i;
+      // 危险作用域：删除动词**之后**的一小段里出现根 / 系统目录 / 家目录 / 盘符根（相对路径不算）
+      const DANGER_SCOPE = /(?:^|\s)(?:\/[\s`'"*]|\/etc\/|\/usr\/|\/var\/|\/bin\/|\/boot\/|\/root\/|~\/|\/(?:dev|proc|sys)\/|[A-Za-z]:\\)/i;
+      const vm = DESTRUCTIVE_VERB.exec(wContent);
+      const dangerScope = !!vm && DANGER_SCOPE.test(wContent.slice(vm.index, vm.index + 160));
+      if (dangerScope) this.sessDanger.set(String(wPath), { danger: true, shape: '破坏性动词 × 危险作用域' });
+    }
+  }
+
+  // ---------- 落点变更重判（绕过链的对侧：小D 42 号件）----------
+  // 🔴 写时打标只解决「写的时候危险」；**落点会被后续动作改写**：写 .md（文档豁免）→ Move-Item 成 .sh
+  //   ⇒ 磁盘上出现含删根命令的脚本。⇒ **每一次改变落点的动作都要重判**：
+  //   源带 danger 标 ∧ 目标落点可执行 ⇒ **review**（问人，不是直接拒——「把文档里的示例抽成脚本」
+  //   本身可能是正当的工程动作；拦死不合适，问一句合适）。
+  checkDangerousRelabel(call) {
+    const args = call?.args ?? {};
+    // ① 动作形态：改名 / 移动 / 复制（工具名或命令形态；槽名与动词表都不穷举）
+    const act = `${call?.name ?? ''} ${Object.values(args).filter((v) => typeof v === 'string').join(' ')}`;
+    const isRelabel = /(rename|move|copy|\bmv\b|\bcp\b|Move-Item|Copy-Item|\bren\b)/i.test(act);
+    if (!isRelabel) return null;
+    // ② 源与目标：**从命令文本里抽路径 token**（args 里往往只有一个整条命令字符串 ⇒ 整体抽不出两个）
+    const rawStrings = Object.values(args).filter((v) => typeof v === 'string');
+    const pathish = [];
+    for (const raw of rawStrings) {
+      if (/\s/.test(raw)) {
+        // 命令文本：逐 token 抽像路径的（去引号）
+        for (const tok of raw.split(/\s+/)) {
+          const t = tok.replace(/^["']|["']$/g, '');
+          if (/^[\w.\-~]*[\\/][\w.\-~\/]*$/.test(t) && /[\\/]/.test(t)) pathish.push(t);
+        }
+      } else if (/[\\/]/.test(raw)) {
+        pathish.push(raw);
+      }
+    }
+    if (pathish.length < 2) return null;
+    // 源 ＝ 带 danger 标的那个；目标 ＝ 另一个
+    let src = null; let dst = null;
+    for (const pth of pathish) {
+      const key = [...this.sessDanger.keys()].find((k) => k === pth || k.endsWith(pth) || pth.endsWith(k));
+      if (key && !src) { src = pth; continue; }
+      if (!dst) dst = pth;
+    }
+    if (!src || !dst) return null;
+    const srcKey = [...this.sessDanger.keys()].find((k) => k === src || k.endsWith(src) || src.endsWith(k));
+    if (!srcKey) return null;
+    // ③ 目标落点可执行？⇒ 才构成「危险内容 × 可执行落点」
+    if (!/\.(sh|bash|zsh|fish|ps1|psm1|bat|cmd|py|rb|pl)$/i.test(dst)) return null;
+    return {
+      reason: `落点变更重判：源「${src}」带危险形态标记（${this.sessDanger.get(srcKey)?.shape ?? '危险形态'}），`
+        + `本次把它移到可执行落点「${dst}」——危险内容 × 可执行落点，须由人取极（问一句，不直接拒）`,
+    };
   }
 
   // ---------- 步骤前置裁决（对应 DSH agent/pre-step）：消息级 H 边界 ----------
@@ -2968,7 +3438,7 @@ export class WeiwenLawEngine {
     if (prov === 'principal') return { kind: 'allow' }; // 主权者自己的话 → 自我决定
     if (prov === 'third-party') {
       if (targetsBehaviorConstraint(flat)) {
-        this.failureStreak += 1;
+        this.bumpFailureStreak();
         return { kind: 'reject', law: 'H', reason: '外部消息（third-party 来源）试图改写主体行为约束——从外部侵入内 H 黑箱（提示词注入/越狱/人格重写）。' };
       }
       return { kind: 'allow' }; // 外部内容作为数据处理 → 放行
@@ -2988,10 +3458,38 @@ export class WeiwenLawEngine {
   }
 
   // ---------- 反馈闭环：一次失败/创伤回写 S/D（S/D → H → M → 回写 S/D 迭代） ----------
-  onFailure(loss = 0) {
+  // ---------- 破窗计数的唯一累加入口（2026-10-29 · 状态层）----------
+  /** 累加破窗计数并通知钩子。**所有** failureStreak 累加都必须走这里（结构收口，
+   *  否则适配层的落盘会漏掉某些路径 ⇒ 破窗态不落盘 ⇒ 重装即清 ⇒ 拦截无效）。 */
+  bumpFailureStreak() {
     this.failureStreak += 1;
+    // 🔴 [2026-10-30 · 破窗态同源（小D 49 号件：回执「已触发破窗 5/5」而 windowBroken:false）]
+    //   修前 windowBroken=true 只由 R 投影累积路径设置；**无域层级归属**的失败走本函数刷 streak，
+    //   达阈后判定面（windowBroken || streak>=cap 双通道）已按破窗处置，但读数面旗标仍 false
+    //   ⇒ 同一个状态、两个字段各说各话。⇒ 置位收口挪到**唯一累加点**：达阈即置旗标。
+    //   ⚠️ 这是**同源化**，不是新增触发条件——判定面本来就按 streak>=cap 处置了，读数面只是补齐真相。
+    if (!this.windowBroken && this.failureStreak >= this.maxFailureStreak) {
+      this.windowBroken = true;
+    }
+    try { this.onStreakChange?.(this.failureStreak, this.windowBroken); } catch { /* 钩子失败不得拦住判定 */ }
+    return this.failureStreak;
+  }
+
+  // 🔴 [2026-10-29 · 失败必须进 S 账（小D 45 号件实测：十次动作锚点恒 0「财务账没有入口」）]
+  //   病根（取证所得）：修前签名 `onFailure(loss = 0)`，而适配层调的是 **`engine.onFailure()`（不传参）**
+  //   ⇒ `loss` 恒为 0 ⇒ `if (loss > 0)` 永不成立 ⇒ **失败只涨 failureStreak（破窗计数），
+  //   从不进 S 账**。⇒ 失败在账本上完全不可见 ⇒「正本 S 账本永不会成为负账」这条安的原话
+  //   （小D 43 号件引）在实现里根本没有承载物。
+  //   按手稿原话：**|−S|＝负向积累（创伤、失败、挫折……）** ⇒ 失败**同时满足**财务口径的两条代理条件
+  //   （有方向、有成本）⇒ 落成负向锚点，不是流水。
+  //   ⚠️ 口径：默认负账量 = 1（一次独立离散事件，law.mjs「『1』＝一次独立事件」），
+  //     **不是**把 failureStreak 全额一次性灌进账（那是流水冒充锚点）。
+  //   ⚠️ 记账只增：记的是"哪条链断了"，不减存量（铁律 #14）。
+  onFailure(loss = 0) {
+    this.bumpFailureStreak();
     // 一次失败/创伤：走 D 路径 |S-1| 绝对侵蚀（当前值下降），同时作为历史刻痕记录（不回退）
-    if (loss > 0) this.recordSteady({ negative: Math.abs(loss), trauma: Math.abs(loss) });
+    const amt = Math.abs(Number(loss) || 0) || 1;   // 缺省 1 ＝ 一次独立离散事件（失败本身就是一次事件）
+    this.recordSteady({ negative: amt, trauma: amt, detail: `失败/挫折：连续失败计数 ${this.failureStreak}（H 付了成本）` });
   }
 
   // ---------- 回执侧破窗投影（回执门，2026-09-21） ----------
@@ -3037,7 +3535,9 @@ export class WeiwenLawEngine {
         capped: false,
         over: 0,
         display: `${proj}/${cap}`,
-        reason: `连续失败/偏离即将达破窗阈值（${proj}/${cap}）：触发 D 破窗止损，防故障扩散杀死整体。复位权在宿主侧（非被审方）。`,
+        reason: `连续失败/偏离即将达破窗阈值（${proj}/${cap}）：触发 D 破窗止损，防故障扩散杀死整体。`
+          + `复位权在**决策方**，不在执行方——执行方（即被审的 AI）不能给自己签复位；`
+          + `决策方（用户/委托方）确认后由宿主侧调用 healBrokenWindow(note) 或 resolveBug(bugKey) 复位。`,
       };
     }
     return null;

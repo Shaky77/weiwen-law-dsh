@@ -72,6 +72,7 @@ export class SAccountLedger {
     action = null,              // 原始动作串：传入则经 classifyReversibility 自动推导 reversible/overwrite（引擎走这条）
     detail = null,
     subsystem = 'core',
+    trailMarked = null,         // 🔴 [2026-10-30] 本条是否在 historyTrail 里留了痕（true/false/null=未声明）
     t = Date.now(),             // D 触发时刻（轴标记 X 坐标）
   } = {}) {
     // 若传了 action，优先由其推导可逆性（覆盖显式 reversible/overwrite）。对应「可逆性＝疤/窗」洞。
@@ -90,6 +91,12 @@ export class SAccountLedger {
       action: action ?? null,
       detail: detail ?? null,
       subsystem,
+      // 🔴 [2026-10-30 · 覆盖率口径（小D 47 号件第二节）] 本条**是否在 historyTrail 留了痕**。
+      //   病根：修前 sTrailCoverage = count(historyTrail) / count(rStore) ⇒ **分子分母不同量纲**
+      //   （刻痕条数 vs 事件条数）⇒ 比值可以 >1（实测 1.28～1.33），而注释写「<1 说明漏记」
+      //   ⇒ **方向反了**。⇒ 现在改成**同量纲**：分母＝事件数，分子＝**留了痕的事件数**。
+      //   ⚠️ 这一位只能由**引擎**写（它在 recordSteady 里同时掌握两本账）⇒ 账本不猜。
+      trailMarked: trailMarked === true ? true : (trailMarked === false ? false : null),
       t,
     };
     if (!this.catalog.has(key)) this.catalog.set(key, []);

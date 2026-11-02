@@ -19,7 +19,7 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'core', '
 
 const ALL_Q = STRATA.flatMap((s) => s.quantities.map((q) => ({ layer: s.layer, ...q })));
 
-test('① 五层齐全且顺序为 R→S→D→H→M（链序不可换）', () => {
+test('① 五层齐全且顺序与链序定义一致（链序不可换）', () => {
   assert.deepEqual(STRATA.map((s) => s.layer), ['R', 'S', 'D', 'H', 'M']);
 });
 
