@@ -312,6 +312,30 @@ const inject = ['tools'];
 //      别把"现在没人接"读成"设计上不该接" —— 那会让真权利人永远无法举证（见 healBrokenWindow 同款问题）。
 const PRINCIPAL_ROLE_HINT = /^(user|human|principal|operator|owner)$/i;
 
+// 🔴 [2026-11-04 · 立柱二/面行分离（小D 62 P1-3 · 三方交集）] 凭据脱敏唯一入口：
+//   R 层自己的锚是「禁止凭据外传」——引擎不得把凭据打在自己的弹窗或日志上。弹窗只显摘要；
+//   日志留审计但 token 打码（保留前 8 位供比对，其余 ***）。所有可能携带命令原文的出口都过这里。
+// 🔴 [2026-11-04 · 立柱二「记账对偶」（小D 62 P1-2 · 三方交集）] 载荷方向判据：
+//   外传成立看**载荷方向**（body/上传体/出站落点），不看「有没有凭据」——token 是「能不能做」的
+//   标记，不是「往哪去」的标记。取回（GET 形态：无发送体）＝ 数据只进不出 ⇒ 不计消耗。
+//   scp/rsync/nc 等双向动词不在此列（天然出站能力，保守归外传）。
+export function isFetchShaped(cmd) {
+  const sh = String(cmd ?? '');
+  if (!/\b(curl|curl\.exe|wget|Invoke-RestMethod|Invoke-WebRequest|irm|iwr|httpie)\b/i.test(sh)) return false;
+  if (/(^|\s)-X\s*["']?(POST|PUT|PATCH|DELETE)\b/i.test(sh)) return false;
+  if (/(^|\s)(-d|--data(\b|-raw|-binary|-urlencode)|-F|--form|-T|--upload-file|--json)\b/i.test(sh)) return false;
+  return true;
+}
+
+export function maskSecrets(v) {
+  const MASK = (s) => String(s)
+    .replace(/((?:github_pat_|ghp_|gho_|ghu_|ghs_|sk-|npm_|xoxb-|AKIA)[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]+/g, '$1***')
+    .replace(/(Bearer\s+)([A-Za-z0-9_\-=.]{8})[A-Za-z0-9_\-=.]+/gi, '$1$2***')
+    .replace(/((?:token|apikey|api_key|access_token|password|secret)\s*[=:]\s*["']?)([A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]+/gi, '$1$2***');
+  if (typeof v === 'string') return MASK(v);
+  try { return JSON.parse(MASK(JSON.stringify(v))); } catch { return v; }
+}
+
 // 结构入口（宿主集成方调用；模型不可达）。返回上一值便于回退，不给"开关式骑墙"留口。
 let _hostPrincipalScope = null;
 // 范围变更留痕（append-only 观测，上限 20）：**撤回必须有痕**。
@@ -1096,8 +1120,11 @@ function apply(ctx) {
             ? '此动作会改写/删除本机的数据——不可撤回的部分无法收回。'
             : (isCredAsk ? '此动作会读取凭据材料（钥匙/密码/token）。' : '此动作的后果本层判据已穷尽，不能替你决定。'));
     // ③ 详情行：判据原文压成**一行摘要**（证据留白箱，不贴整段）
+    //    🔴 [2026-11-04 · P1-3] 摘要过 maskSecrets——判据原文可能引用命令原文（含凭据字面量），
+    //    弹窗是显示面，显示面不得出现完整凭据（maskSecrets 唯一入口）。
     const rawDetail = String(decision.reason ?? '').split('\n')[0].trim();
-    const detailLine = rawDetail.length > 72 ? `${rawDetail.slice(0, 72)}…` : (rawDetail || '（本层判据穷尽）');
+    const detailLine0 = rawDetail.length > 72 ? `${rawDetail.slice(0, 72)}…` : (rawDetail || '（本层判据穷尽）');
+    const detailLine = String(maskSecrets(detailLine0));
     // 「始终同意」记忆命中 ⇒ 同类不再询问（这就是第四态的效果面），回执仍留痕说明来自哪一次批准。
     if (_reviewAlways.has(rk)) {
       return { always: true, key: rk };
@@ -1281,6 +1308,19 @@ function apply(ctx) {
         const at = decision?.attrib;
         const cmdCat = commandLayer(String(call?.args?.command ?? call?.args?.cmd ?? call?.args?.script ?? '')) || '';
         if (at && (cmdCat === 'exfil' || cmdCat === 'exfil-net' || at.layer === 'network-send' || at.layer === 'exfil' || at.layer === 'exfil-net')) {
+          // 🔴 [2026-11-04 · 立柱二「记账对偶」（小D 62 P1-2 · 三方交集）] 先看载荷方向再记账：
+          //   取回形态（GET，无发送体）＝ 数据只进不出 ⇒ **不计消耗**（sign:'0' 取回条目，同类一条）；
+          //   真外传（有发送体/上传动词）⇒ 维持负账（数据出去回不来，稳态被消耗）。
+          //   旧病灶：拿「命令里有没有凭据」当「数据往哪去」——token 是能力标记不是方向标记。
+          const _cmd0 = String(call?.args?.command ?? call?.args?.cmd ?? call?.args?.script ?? '');
+          if (isFetchShaped(_cmd0)) {
+            engine.recordStructural?.({
+              cls: 'struct::net::fetch',
+              sign: '0',
+              rule: '取回（GET 形态，无发送体）⇒ 数据方向为入站，不计消耗、不扣负账（严度由方向定，不由动作定）',
+            });
+            logline(`pre-execute ${exec?.name} -> 取回已执行（人批准）| 记账：sign:0 取回（不计消耗，载荷方向判据）`);
+          } else {
           //   ⚠️ 第三层教训：sLedger 只在 positive/negative/trauma > 0 时**建条目**（sign 由事实推，
           //     但只传 executed 不建条目）⇒ 0.3.3 的「账没记」有两层原因（命名空间 + 这里）。
           //   口径：外传执行 ⇒ 数据出去回不来 ⇒ 稳态**被消耗** ⇒ 显式记负账（不是 +S：「放行 ≠ 增益」，
@@ -1289,7 +1329,7 @@ function apply(ctx) {
             executed: true,
             negative: 1,
             attrib: at,
-            action: String(call?.args?.command ?? call?.args?.body ?? '').slice(0, 200),
+            action: String(maskSecrets(call?.args?.command ?? call?.args?.body ?? '')).slice(0, 200),
             detail: '外传已执行（人批准）：数据离开本地，不可撤回——稳态被消耗，如实记负账（账只增）',
           });
           // 🔴 [2026-10-30 · 结构账接线（小D 51 号件 · 安 10-30 原话）] 同类外传首次经 M 完成
@@ -1300,6 +1340,7 @@ function apply(ctx) {
             sign: '-',
             rule: '同类外传 ⇒ 问人（review）；批则放行并记负账；不可撤回（数据离开本地）',
           });
+          }
         }
         // 不进 markBlocked：放行的调用走真执行，回执是真结果，不是"我造成的 error"
         logline(`pre-execute ${exec?.name} -> review(委托人放行这一次) -> next | whitebox ${JSON.stringify({ ...decision, humanVerdict: 'allowed-once' })}`);
@@ -1394,11 +1435,21 @@ function apply(ctx) {
       // ═══ 白箱贯彻：接口所见＝日志所记（同一对象，不分叉）═══
       // 日志是 append-only 审计面（src/runtime.log，.gitignore 排除、不入库）。若此处另写一份"摘要"，
       //   两份一旦漂移，白箱即退化为"看起来白箱" ⇒ 故记的就是**返回的那个对象本身**。
-      logline(`pre-execute ${exec?.name} -> ${decision.kind}${isReview ? '(awaitingHuman, bugKey=' + out.bugKey + ')' : ''} | whitebox ${JSON.stringify(out)}`);
+      // 🔴 [2026-11-04 · P2-2 origin] 插件自己的拒绝带 origin:'plugin'——actor 说谁批的，origin 说谁拦的。
+      // 🔴 [2026-11-04 · P1-3] 日志过 maskSecrets——审计面留痕但凭据打码（显示面零凭据）。
+      if (out.kind === 'reject' || out.kind === 'review') out.origin = 'plugin';
+      logline(`pre-execute ${exec?.name} -> ${decision.kind}${isReview ? '(awaitingHuman, bugKey=' + out.bugKey + ')' : ''} | whitebox ${JSON.stringify(maskSecrets(out))}`);
       return out;
     }
     // allow：同样留白箱记录 —— 否则"没被拦"成了**无痕事件**（与引擎侧"每次链推进必留刻痕"同构）。
-    logline(`pre-execute ${exec?.name} -> whitebox ${JSON.stringify(decision)}`);
+    // 🔴 [2026-11-04 · 立柱二（阿澄 P2）] allow 落 sign:'0' 结构条目（同类一条）——「审过放行」是
+    //   在场证明，不是消耗：正向留痕让「载体只靠没被拦推断被审过」的旧病灶（小D 58）无再生土壤。
+    logline(`pre-execute ${exec?.name} -> whitebox ${JSON.stringify(maskSecrets(decision))}`);
+    engine.recordStructural?.({
+      cls: 'struct::observed::allow',
+      sign: '0',
+      rule: '放行（allow）＝ 在场证明：审过、可回放，不计消耗不记增益（记账对偶：allow 也留痕）',
+    });
     return next();
   });
 
@@ -1419,28 +1470,45 @@ function apply(ctx) {
     channel.agentBoundary = observeBoundary(payload?.agent);
     channel.lastObservedAt = new Date().toISOString();
     logline(`pre-step observed (shape=${rd.shape}, roles=[${rd.rolesSeen.join(',')}], clue=${rd.principalClue ? 'yes' : 'no'}, authority=${channel.authoritySeen ? 'structural-entry' : 'NONE'}) — 窗口面不授权，锚池不由此填充，不猜`);
-    const decision = engine.decidePreStep(payload?.messages);
-    // reject（明确越界）与 review（定义不明/判不出来）同作阻断、不扩散。
-    // review 即"搁置返回用户决策"：宁可先拦截，待用户裁决后再执行，不可直接放。
-    if (decision.kind === 'reject' || decision.kind === 'review') {
-      if (decision.kind === 'review') {
-        // PreStepDecision 契约仅 {kind:'reject'}、不携带 reason/branches，
-        // 故富信息（定义不明缘由 + 留证身份 + 推演后果）记入 runtime.log 供审计，
-        // 宿主侧以 reject 阻断该步、交还用户裁决。
-        const call = { name: 'pre-step', args: { messages: payload?.messages } };
-        const bug = bugKeyOf(call);
-        const branches = deduceBranches(engine, call);
-        logline(`pre-step review(定义不明) -> 搁置返回用户决策 bugKey=${bug}` + (branches ? ` branches=${JSON.stringify(branches)}` : ''));
-      } else {
-        logline(`pre-step -> reject(${decision.law})`);
+    // 🔴 [2026-11-04 · 立柱一「归属显式」（小D 62 P0-1 · 三方交集）] 字段桥修复：
+    //   引擎读 `provenance`，DSH 实际字段是 `role`/`source.kind` —— 适配层知道（PRINCIPAL_ROLE_HINT
+    //   就在本文件）但没接 ⇒ prov 恒 undefined ⇒ 主权者的话被当外人审。最小修法：批量内任一消息
+    //   role 命中主权者词表 ⇒ 整批补 provenance:'principal'（与引擎的批级语义一致——pre-step 裁决
+    //   的就是用户发起的这一轮；工具结果走 pre-execute/post-execute，不经此门）。
+    const _psMsgs = payload?.messages;
+    const _isPrincipalTurn = Array.isArray(_psMsgs)
+      && _psMsgs.some((m) => PRINCIPAL_ROLE_HINT.test(m?.role ?? ''));
+    const decision = engine.decidePreStep(
+      _isPrincipalTurn
+        ? _psMsgs.map((m) => ({ ...m, provenance: 'principal' }))
+        : _psMsgs
+    );
+    // 🔴 [2026-11-04 · 立柱三「面行分离」（小D 62 P0-2 · 安原话判据）] 显示 ≠ 执行：
+    //   闸门装在「手上」，不装「嘴巴」。review ⇒ **可见决策点**（走审批通道问人），不再把 review
+    //   压成静默 reject（那等于把消息吃掉——11-02/11-03 事故的根源之一）。人批 ⇒ next()（显示且
+    //   据此行动，责任在裁决）；人拒 ⇒ reject（不据此行动）；无审批服务 ⇒ fail-closed reject（富
+    //   信息留日志）。宿主契约仍只认 {kind:'reject'} ⇒ 显示面我们能保证的是「弹窗摘要可见」，
+    //   消息本体的显示归宿主（P2-1 同族缺口：宿主显示回执位，向上走）。
+    // 🔴 [2026-11-04 · 立柱二「归属显式」P2-2] 拒绝回执加 origin:'plugin'——actor 说谁批的，
+    //   origin 说谁拦的（沙箱拒/插件拒/原生拒不再同形）。
+    if (decision.kind === 'reject') {
+      logline(`pre-step -> reject(${decision.law}) | whitebox ${JSON.stringify(maskSecrets({ ...decision, origin: 'plugin', bugKey: bugKeyOf({ name: 'pre-step', args: { messages: payload?.messages } }), conduction: engine.conduction ?? [] }))}`);
+      return { kind: 'reject', origin: 'plugin' };
+    }
+    if (decision.kind === 'review') {
+      const call = { name: 'pre-step', args: { messages: payload?.messages } };
+      const bug = bugKeyOf(call);
+      const branches = deduceBranches(engine, call);
+      logline(`pre-step review(定义不明) -> 可见决策点（走审批通道） bugKey=${bug}` + (branches ? ` branches=${JSON.stringify(maskSecrets(branches))}` : ''));
+      logline(`pre-step -> whitebox ${JSON.stringify(maskSecrets({ ...decision, bugKey: bug, conduction: engine.conduction ?? [] }))}`);
+      const verdict = await requestReviewVerdict({ name: 'pre-step' }, decision, call);
+      if (verdict === 'allowed-once') {
+        logline(`pre-step review -> 委托人放行这一次 -> next | whitebox ${JSON.stringify(maskSecrets({ ...decision, humanVerdict: 'allowed-once' }))}`);
+        return next();
       }
-      // ═══ 白箱贯彻：与 tools/pre-execute 同构 ═══
-      // 宿主契约（PreStepDecision）只认 {kind:'reject'} ⇒ 富信息**无法随返回值出去**，日志即此处唯一白箱面。
-      // 修前此处只挑了 bugKey / branches 几个名字写日志 —— 同一个"按名挑选"的毛病：
-      //   引擎决定对象本身（law/reason）与**本次链落点**（engine.conduction）都没进审计面。
-      // 改为如实载入**引擎决定对象本身** + 适配层补项（同一"按位、不按名"原则）。
-      logline(`pre-step -> whitebox ${JSON.stringify({ ...decision, bugKey: bugKeyOf({ name: 'pre-step', args: { messages: payload?.messages } }), conduction: engine.conduction ?? [] })}`);
-      return { kind: 'reject' };
+      // rejected 或 null（无审批服务，fail-closed）：不据此行动；弹窗摘要已是可见决策点。
+      logline(`pre-step review -> ${verdict === 'rejected' ? '委托人拒绝' : '无审批服务 fail-closed'} -> reject | whitebox ${JSON.stringify(maskSecrets({ ...decision, humanVerdict: verdict ?? 'no-approval-service' }))}`);
+      return { kind: 'reject', origin: 'plugin' };
     }
     return next();
   });

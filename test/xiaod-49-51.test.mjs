@@ -164,7 +164,11 @@ test('🔴 expansion 读数：只呈现 sigmaS（真身）与距离缺位，不�
   await handlers['tools/pre-execute'](DELETEROOT(), next);
   const after = await readSteady();
   assert.ok(after.expansion, '跃迁读数必须在');
-  assert.equal(after.expansion.sigmaS, after.structLedgerSize, 'sigmaS＝结构账条目数（真身口径）');
+  // 🔴 [2026-11-04 · 立柱二「记账对偶」（小D 62 P1-1 · 三方交集）] ΣS 只数有方向锚点（sign ±），
+  //   sign:'0' 占位排除在厚度之外；可审计差值：structLedgerSize − ΣS ＝ 占位条数。
+  const placeholders = (after.structLedger ?? []).filter((e) => e.sign === '0').length;
+  assert.equal(after.expansion.sigmaS, after.structLedgerSize - placeholders,
+    'ΣS＝有方向锚点数；structLedgerSize − ΣS ＝ 占位数（可审计差值）');
   assert.equal(after.expansion.r0, null, 'R₀ 由决策方给定 ⇒ 引擎如实报 null，不编数');
   assert.equal(after.expansion.triggered, false, '引擎不自动触发 R_EXPANSION（跳3 归决策方）');
   assert.match(after.expansion.note, /决策方|decider/, 'note 必须写明归属');

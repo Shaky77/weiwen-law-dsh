@@ -495,6 +495,13 @@ function inferCallSemantics(call, ctx = {}) {
     isCredWrite,
     isSystem: SYSTEM_PATH.test(path) || SYSTEM_PATH.test(sh) || SYSTEM_PATH_WIN.test(path) || SYSTEM_PATH_WIN.test(sh),
     isExternal,
+    // 🔴 [2026-11-04 · 立柱一「归属显式」（小D 62 P0-1 · 三方交集）] 推演层快照必须携带归属：
+    //   「谁说的」是归属，不是授权——归属在过闸前解析固化（适配层补桥），推演层按归属分岔：
+    //   third-party ⇒ 侵内 H 成立；principal ⇒ 永不侵内；未标注 ⇒ 待归属（不预设外人）。
+    //   pre-step 调用的形态是 {name:'pre-step', args:{messages}} ⇒ 归属从首条消息取。
+    provThirdParty: call?.args?.messages?.[0]?.provenance === 'third-party' || call?.args?.messages?.[0]?.ctx?.provenance === 'third-party',
+    provPrincipal: call?.args?.messages?.[0]?.provenance === 'principal' || call?.args?.messages?.[0]?.ctx?.provenance === 'principal',
+    provAttributed: Boolean(call?.args?.messages?.[0]?.provenance ?? call?.args?.messages?.[0]?.ctx?.provenance),
     hitsInnerH: hitsInnerH(packed),
     // 方向信号（非内容信号）：执行内容在执行前是否可审计。
     // 三段结构齐备才成立（不透明源 → 转换/求值 → 执行落点），避免把"写文档"误判为执行。
@@ -594,7 +601,14 @@ function simulateBranch(s, kind, premise = inferencePremise(s)) {
   }
   // D-1 路径（=|S-1|）：假定 call 触发损伤。侵蚀量按风险信号严重度分级（客观结构，非枚举具体值）。
   // 分支按严重度从高到低排列：轻信号不得遮蔽重信号（如 hasOpaqueVar -1 不得挡 isCred -3）。
-  if (s.hitsInnerH) return { path: 'D-1', finalS: -3, note: '侵内 H 黑箱（思想/自由意志）' };
+  // 🔴 [2026-11-04 · 立柱一「归属显式」（小D 62 P0-1）] 侵内 H 分支按归属分岔：
+  //   third-party ⇒ 侵内 H 成立（D-1/−3 如实）；principal ⇒ 永不侵内；未标注 ⇒ **待归属，不预设外人**
+  //   （解析失败走待归属，不走当外人——立柱一规约 2），罚分不落：未定性为侵即不记创伤。
+  if (s.hitsInnerH) {
+    if (s.provThirdParty) return { path: 'D-1', finalS: -3, note: '侵内 H 黑箱（思想/自由意志）——来源已显式归属为第三方' };
+    if (s.provPrincipal) return { path: 'allow', finalS: 0, note: '主权者自己的话——归属显式，内 H 不审（自我决定）' };
+    return { path: 'D-1', finalS: 0, note: '来源未标注——待归属（不预设外人、不记罚分）：交还主权者裁决' };
+  }
   // 方向判据优先于内容判据：内容被遮蔽时无法做内容判定，但"不可审计执行"的方向已确定为坏。
   if (s.isOpaqueExec) return { path: 'D-1', finalS: -3, note: '执行内容不可审计（不透明源→转换/求值→执行落点）：后果不可推演，方向恒为 S 不可保' };
   // 链式兜底（2026-08-25）：本会话写入的脚本被执行——内容来源已知（登记表），按登记内容定级
@@ -1837,7 +1851,11 @@ export class WeiwenLawEngine {
       //   引擎不自动触发 R_EXPANSION，只把「距 R₀ 还有多少」如实呈现。r0 无引擎数值（手稿未定值、
       //   决策方定）⇒ 如实报 null；distance 据此也无法算出具体数 ⇒ 一并 null，只有 sigmaS（真身）可读。
       expansion: {
-        sigmaS: this.sStructLedger.size,
+      // 🔴 [2026-11-04 · 立柱二「记账对偶」（小D 62 P1-1 · 三方交集）] ΣS 只数有方向的锚点
+      //   （sign ∈ {'+','-'}）；sign:'0' 占位留在账上但**排除在厚度之外**——「占位不得进判定」。
+      //   可审计差值：structLedgerSize − ΣS ＝ 占位条数（读数本身能被审计，账不平立刻可见）。
+      sigmaS: [...this.sStructLedger.values()].filter((e) => e?.sign === '+' || e?.sign === '-').length,
+      sigmaSNote: 'ΣS＝有方向锚点数（sign ±）；structLedgerSize − ΣS ＝ sign:"0" 占位数（可审计差值，立柱二）',
         r0: null,
         distance: null,
         triggered: false,
