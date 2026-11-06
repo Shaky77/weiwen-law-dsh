@@ -55,8 +55,6 @@
 - **领域专用因果护栏**（Causal Safety Engine / LLMGuardrail 等）→ 它们绑领域（安全 / LLM / 幻觉），我们**领域无关**；
 - **跨法域法律因果 AI**（judgeai 等）→ 它们 jurisdiction-**aware**（编码法域、换规范包），我们**法域中性**（根本不编码法域，法律只是抽样领域之一）。
 
-完整双语对照（含 prior-art 出处与诚实边界）：[`versions/live/evidence/weiwen-vs-market-causal.md`](https://github.com/Shaky77/weiwen-law-dsh/blob/main/versions/live/evidence/weiwen-vs-market-causal.md)
-
 ## 概念注解：H 的作用方式
 
 > **H 是减熵动作。** 引擎里其余环节都是**被动流转**——流转必损（熵增），纯流转必然衰减停摆；要不停摆，就必须有一处**主动注入势能**，而那个位置不能落在被动环节，只能是 H。所以 H 减的不是量，是**方向上的不确定**：它的效力不来自自身"体量"，而来自**已积累的稳态存量**与**随时进入的扰动**之间那股必须被取舍的张力，**在这里起杠杆作用**。
@@ -189,7 +187,6 @@ src/core/law.mjs      # 常量定义
 src/core/engine.mjs   # 纯逻辑裁决引擎（零 DSH 依赖，可单测）
 test/                 # 单元测试 + 真实案例测试 + 对齐回归（`npm test` 全绿）
 examples/             # 可复跑实测（demo-tool-loop / demo-backtrack-run）
-docs/index.html       # 演示页：浏览器内跑真引擎（GitHub Pages 部署源）
 docs/engine/          # 由 src/core/*.mjs 生成的浏览器镜像（勿手改）
 docs/model-level-and-benchmark.md  # 基准口径声明
 scripts/build-docs-engine.mjs  # 生成器：npm run build:docs / check:docs（验同源漂移）
@@ -278,7 +275,7 @@ dsh plugin --profile web add "github:Shaky77/weiwen-law-dsh"
 ### 日常使用 vs 压测
 
 - **Web / Standard 模式**：日常对话与工程任务，插件在后台静默约束。
-- **Headless 模式**：`dsh --profile headless` 无界面批量运行，适合回归测试与多 Agent 压测（本仓库 `versions/live/evidence/` 即此类实测归档）。
+- **Headless 模式**：`dsh --profile headless` 无界面批量运行，适合回归测试与多 Agent 压测。
 
 ### 注意事项
 
@@ -310,7 +307,7 @@ dsh plugin --profile web add "github:Shaky77/weiwen-law-dsh"
 
 - **依赖**：Node.js `^22.19 || >=24`；运行时依赖仅 `@deepseek-ai/dsh-tools`（peerDependency，可选）。
 - **测试**：`npm test`（即 `node --test "test/*.test.mjs"`）—— **条数以实测输出为准**，不在此写死（防随测试增长而过期）。
-- **演示页**：`docs/index.html` 在浏览器内直接跑 `docs/engine/*.js`（由 `src/core/*.mjs` 生成）。**镜像只许生成、不许手改** —— 改完 `src/core` 后跑 `npm run build:docs`，用 `npm run check:docs` 验漂移（返回非零即有漂移）。
+- **浏览器镜像**：`docs/engine/*.js` 由 `src/core/*.mjs` 生成，**只许生成、不许手改** —— 改完 `src/core` 后跑 `npm run build:docs`，用 `npm run check:docs` 验漂移（返回非零即有漂移）。
 - **构建**：无需构建（纯 ESM + yml overlay）；修改 `src/core/engine.mjs` 后重跑 `npm test` 回归。
 - **贡献**：框架本体（心法层）冻结于基础版仓库，本活系统版承载工程迭代；改动请基于本仓库 PR，并附 `node --test` 实测输出。
 
